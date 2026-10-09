@@ -1,3 +1,3 @@
-# devops-pipeline-e2e by ir
+# devops-pipeline-e2e by ian rebelo
 Projeto em construção...
 Pipeline DevOps de ponta a ponta: uma aplicação web mínima publicada com Git, Docker, Kubernetes, Terraform e GitHub Actions.
