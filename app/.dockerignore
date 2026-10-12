@@ -1,0 +1,17 @@
+# Secrets: never send to the build
+.env
+*.pem
+*.key
+
+# Python generated files
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Development and test files, not needed to run the application
+test_app.py
+requirements-dev.txt
+
+# Build files themselves
+Dockerfile
+.dockerignore
