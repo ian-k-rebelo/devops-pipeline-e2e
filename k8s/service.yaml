@@ -1,0 +1,22 @@
+# Service: stable internal address and load balancing across the application Pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: devops-pipeline-e2e
+  namespace: devops-pipeline-e2e
+  labels:
+    app.kubernetes.io/name: devops-pipeline-e2e
+    app.kubernetes.io/part-of: devops-pipeline-e2e
+spec:
+  # Internal-only address, reachable from inside the cluster
+  type: ClusterIP
+  # Send traffic to the Pods with this label
+  selector:
+    app.kubernetes.io/name: devops-pipeline-e2e
+  ports:
+    - name: http
+      protocol: TCP
+      # Port the Service listens on
+      port: 80
+      # Port on the Pods, by name (8000 in the Deployment)
+      targetPort: http
