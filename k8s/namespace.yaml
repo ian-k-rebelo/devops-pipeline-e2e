@@ -1,0 +1,10 @@
+# Namespace for the application, isolated from the cluster's default namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: devops-pipeline-e2e
+  labels:
+    app.kubernetes.io/part-of: devops-pipeline-e2e
+    # Pod Security Standards: reject Pods that do not meet the "restricted" level, and warn about them
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted

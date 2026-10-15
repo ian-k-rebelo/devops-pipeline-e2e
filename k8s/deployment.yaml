@@ -1,0 +1,72 @@
+# Application Deployment: replicas of the application image
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devops-pipeline-e2e
+  namespace: devops-pipeline-e2e
+  labels:
+    app.kubernetes.io/name: devops-pipeline-e2e
+    app.kubernetes.io/part-of: devops-pipeline-e2e
+spec:
+  # Number of copies (Pods) to keep running
+  replicas: 2
+  # Which Pods belong to this Deployment
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: devops-pipeline-e2e
+  # Template used to create each Pod
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: devops-pipeline-e2e
+        app.kubernetes.io/part-of: devops-pipeline-e2e
+    spec:
+      # Keep replicas evenly spread across nodes; nodes the Pods cannot use (control plane) are left out
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          nodeTaintsPolicy: Honor
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: devops-pipeline-e2e
+      # Pod security: refuse to run as root and use the runtime's default syscall filter
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: devops-pipeline-e2e:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          # Is the Pod ready to receive traffic? While failing, the Service stops sending requests to it
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # Is the application still alive? After 3 failures in a row, the container is restarted
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # Reserved resources (used for scheduling) and memory limit; no CPU limit, to avoid throttling
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          # Container security: no privilege escalation and no Linux capabilities
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]   
