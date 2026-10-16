@@ -1,0 +1,24 @@
+# Application routing: requests arriving at the shared gateway go to this application's Service
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: devops-pipeline-e2e
+  namespace: devops-pipeline-e2e
+  labels:
+    app.kubernetes.io/name: devops-pipeline-e2e
+    app.kubernetes.io/part-of: devops-pipeline-e2e
+spec:
+  # Attach to the shared gateway (platform), on its HTTP listener
+  parentRefs:
+    - name: public
+      namespace: gateway
+      sectionName: http
+  rules:
+    # Every path (/ and below) goes to the application's Service
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: devops-pipeline-e2e
+          port: 80
