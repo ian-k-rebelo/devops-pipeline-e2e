@@ -1,0 +1,4 @@
+# Helm values for Envoy Gateway (chart: oci://docker.io/envoyproxy/gateway-helm)
+# CRDs are installed separately by scripts/install-platform.sh, so the chart must not install them
+crds:
+  enabled: false
