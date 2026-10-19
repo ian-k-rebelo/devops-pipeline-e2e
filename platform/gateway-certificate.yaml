@@ -1,0 +1,27 @@
+# Gateway TLS certificate (platform): issued by the internal CA for the application's hostname
+# cert-manager stores the certificate and its private key in a Secret in the gateway namespace, never in Git
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: app-devops-pipeline-e2e-internal
+  namespace: gateway
+  labels:
+    app.kubernetes.io/part-of: devops-pipeline-e2e
+spec:
+  # Secret that the Gateway's HTTPS listener will use (step 34)
+  secretName: app-devops-pipeline-e2e-internal-tls
+  # The only name this certificate is valid for
+  dnsNames:
+    - app.devops-pipeline-e2e.internal
+  # 90 days; cert-manager renews it automatically at about 2/3 of its lifetime (~day 60)
+  duration: 2160h
+  # A new ECDSA P-256 key is generated on every renewal
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  # Signed by the internal CA (step 32)
+  issuerRef:
+    name: internal-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
