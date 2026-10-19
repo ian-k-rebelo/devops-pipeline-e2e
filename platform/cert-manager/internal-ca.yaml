@@ -1,0 +1,49 @@
+# Internal CA (platform): a private root CA managed by cert-manager, used to sign the platform's certificates
+# The root's private key is stored in a Secret inside the cluster (cert-manager namespace), never in Git
+
+# 1) Bootstrap issuer: only used once, to self-sign the root CA certificate below
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-bootstrap
+  labels:
+    app.kubernetes.io/part-of: devops-pipeline-e2e
+spec:
+  selfSigned: {}
+
+---
+# 2) Root CA certificate: ECDSA P-256, valid for 10 years, stored in the Secret "internal-root-ca"
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: internal-root-ca
+  namespace: cert-manager
+  labels:
+    app.kubernetes.io/part-of: devops-pipeline-e2e
+spec:
+  isCA: true
+  commonName: devops-pipeline-e2e Internal Root CA
+  subject:
+    organizations:
+      - devops-pipeline-e2e
+  duration: 87600h # 10 years
+  secretName: internal-root-ca
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+---
+# 3) Internal CA issuer: signs application certificates with the root CA above, for any namespace
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: internal-ca
+  labels:
+    app.kubernetes.io/part-of: devops-pipeline-e2e
+spec:
+  ca:
+    secretName: internal-root-ca
