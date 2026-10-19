@@ -1,0 +1,4 @@
+# Helm values for cert-manager (chart: oci://quay.io/jetstack/charts/cert-manager)
+# CRDs are installed separately by scripts/install-platform.sh, so the chart must not install them
+crds:
+  enabled: false

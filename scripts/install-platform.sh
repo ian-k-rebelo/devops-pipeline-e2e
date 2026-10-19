@@ -5,6 +5,7 @@ set -euo pipefail
 
 # Versions (CRDs and controller must always match)
 ENVOY_GATEWAY_VERSION="v1.9.2"
+CERT_MANAGER_VERSION="v1.21.2"
 EXPECTED_CONTEXT="kind-devops-pipeline-e2e"
 
 # Safety check: refuse to run against any cluster other than the expected one
@@ -33,5 +34,18 @@ helm upgrade --install eg oci://docker.io/envoyproxy/gateway-helm \
   --values platform/envoy-gateway/values.yaml
 
 kubectl wait --timeout=5m -n envoy-gateway-system deployment/envoy-gateway --for=condition=Available
+
+echo "==> cert-manager ${CERT_MANAGER_VERSION}: CRDs"
+kubectl apply --server-side \
+  -f "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.crds.yaml"
+
+echo "==> cert-manager ${CERT_MANAGER_VERSION}: controller"
+helm upgrade --install cert-manager oci://quay.io/jetstack/charts/cert-manager \
+  --version "${CERT_MANAGER_VERSION}" \
+  --namespace cert-manager \
+  --create-namespace \
+  --values platform/cert-manager/values.yaml
+
+kubectl wait --timeout=5m -n cert-manager deployment --all --for=condition=Available
 
 echo "==> Platform installed"
