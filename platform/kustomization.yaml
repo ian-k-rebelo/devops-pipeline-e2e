@@ -1,0 +1,8 @@
+# Platform: the shared entry point (Gateway) and its TLS resources (internal CA and gateway certificate)
+# The Helm values files in the subfolders are used by scripts/install-platform.sh, not by Kustomize
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - gateway.yaml
+  - cert-manager/internal-ca.yaml
+  - gateway-certificate.yaml
