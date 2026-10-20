@@ -8,11 +8,14 @@ metadata:
     app.kubernetes.io/name: devops-pipeline-e2e
     app.kubernetes.io/part-of: devops-pipeline-e2e
 spec:
-  # Attach to the shared gateway (platform), on its HTTP listener
+  # Attach to the shared gateway (platform), on its HTTPS listener
   parentRefs:
     - name: public
       namespace: gateway
-      sectionName: http
+      sectionName: https
+  # Hostname this application answers on (must match the listener's hostname and certificate)
+  hostnames:
+    - app.devops-pipeline-e2e.internal
   rules:
     # Every path (/ and below) goes to the application's Service
     - matches:

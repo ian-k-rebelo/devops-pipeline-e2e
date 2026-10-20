@@ -14,7 +14,7 @@ metadata:
 spec:
   controllerName: gateway.envoyproxy.io/gatewayclass-controller
 ---
-# The entry point: listens for HTTP on port 80 and accepts routes from the project's namespaces
+# The entry point: listens for HTTPS only (no plain HTTP) and accepts routes from the project's namespaces
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -23,9 +23,16 @@ metadata:
 spec:
   gatewayClassName: envoy
   listeners:
-    - name: http
-      protocol: HTTP
-      port: 80
+    # HTTPS on port 443: TLS is terminated here, with the certificate issued by the internal CA
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: app.devops-pipeline-e2e.internal
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: app-devops-pipeline-e2e-internal-tls
       allowedRoutes:
         namespaces:
           from: Selector
