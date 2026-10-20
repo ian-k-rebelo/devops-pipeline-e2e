@@ -1,0 +1,8 @@
+# Local environment (kind): the application base, with the image built locally and loaded with "kind load"
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: devops-pipeline-e2e
+    newTag: local

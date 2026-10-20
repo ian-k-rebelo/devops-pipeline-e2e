@@ -37,7 +37,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: devops-pipeline-e2e:local
+          # Image tag is set per environment by the Kustomize overlay (k8s/overlays/)
+          image: devops-pipeline-e2e
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
