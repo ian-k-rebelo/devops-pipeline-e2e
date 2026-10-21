@@ -21,6 +21,15 @@ the Flask application behind an Envoy Gateway, over HTTPS only, with a certifica
 
 No `sudo` is needed: your user only needs to be able to run Docker.
 
+### Get the code
+
+```bash
+git clone https://github.com/ian-k-rebelo/devops-pipeline-e2e.git
+cd devops-pipeline-e2e
+```
+
+All the commands below are run from the repository root.
+
 `cloud-provider-kind` gives the Gateway an external IP. Keep it running in a separate terminal:
 
 ```bash
