@@ -5,7 +5,7 @@ app = Flask(__name__)
 # Main page
 @app.route("/")
 def index():
-    return "Hello from devops-pipeline-e2e!"
+    return "Hello from devops-pipeline-e2e!\n"
 
 # Health check endpoint, used by Kubernetes probes
 @app.route("/health")
