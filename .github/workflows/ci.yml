@@ -1,4 +1,5 @@
-# Continuous integration: run the application tests on every pull request and on every push to main
+# Continuous integration: test the application and build its container image
+# on every pull request and on every push to main
 name: CI
 
 on:
@@ -35,3 +36,41 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -v
+
+  image:
+    name: Image
+    # Only build the image when the tests pass
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # BuildKit builder, able to use the GitHub Actions cache
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Build the image from app/ (not published yet) and load it into the runner's Docker;
+      # layers are cached between runs, so unchanged steps are not rebuilt
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: app
+          push: false
+          load: true
+          tags: devops-pipeline-e2e:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Smoke test: the container starts and answers on /health within 10 seconds
+      - name: Smoke test
+        run: |
+          docker run -d --name smoke -p 8000:8000 devops-pipeline-e2e:ci
+          for i in $(seq 1 10); do
+            if curl -fsS http://localhost:8000/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs smoke
+          exit 1
