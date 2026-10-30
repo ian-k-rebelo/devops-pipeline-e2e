@@ -74,3 +74,13 @@ jobs:
           done
           docker logs smoke
           exit 1
+
+      # Vulnerability scan: fail on HIGH or CRITICAL vulnerabilities that already have a fix;
+      # Trivy is pinned by digest because its releases were compromised in March 2026
+      - name: Scan image for vulnerabilities
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c \
+            image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress \
+            devops-pipeline-e2e:ci
