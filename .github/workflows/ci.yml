@@ -1,11 +1,13 @@
-# Continuous integration: test the application and build its container image
-# on every pull request and on every push to main
+# Continuous integration: test the application, then build, smoke test and scan its
+# container image on every pull request; on pushes to main and version tags, also publish it
 name: CI
 
 on:
   pull_request:
   push:
     branches: [main]
+    # Version tags (v1.2.3) publish the image with its semantic version
+    tags: ["v*"]
 
 # Least privilege: by default, every job can only read the repository
 permissions:
@@ -84,3 +86,54 @@ jobs:
             aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c \
             image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress \
             devops-pipeline-e2e:ci
+
+  publish:
+    name: Publish
+    # Only publish an image that was built, smoke tested and scanned
+    needs: image
+    # Only on pushes to main and version tags, never on pull requests
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    # Only this job can write to the GitHub Container Registry
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Image name, tags and labels: sha-<commit> and main on main;
+      # X.Y.Z and X.Y on version tags; never latest
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          flavor: |
+            latest=false
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      # Log in with the short-lived token GitHub creates for this run; no stored secrets
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Rebuild from the cache written by the Image job (same layers) and push
+      - name: Build and push image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: app
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
