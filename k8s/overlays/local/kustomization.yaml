@@ -1,4 +1,5 @@
-# Local environment (kind): the application base, with the image built locally and loaded with "kind load"
+# Local environment (kind): the application base with a locally built image
+# scripts/deploy-local.sh replaces the "local" tag below with a unique tag per build (commit + image content)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
