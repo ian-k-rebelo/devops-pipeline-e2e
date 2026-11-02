@@ -1,5 +1,6 @@
-# Base image: official Python, slim variant, fixed versions of Python and Debian
-FROM python:3.12.15-slim-trixie
+# Base image: official Python, slim variant, fixed versions of Python and Debian;
+# pinned by digest, so it only changes through a reviewed pull request (Dependabot)
+FROM python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 
 # Python settings for containers: no .pyc files, logs written immediately
 ENV PYTHONDONTWRITEBYTECODE=1 \
