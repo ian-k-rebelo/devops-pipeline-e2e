@@ -44,6 +44,10 @@ jobs:
     # Only build the image when the tests pass
     needs: test
     runs-on: ubuntu-24.04
+    # Passed to the Publish job: the digest of the exact image that was tested, and its registry tags
+    outputs:
+      digest: ${{ steps.archive.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,17 +56,57 @@ jobs:
       # BuildKit builder, able to use the GitHub Actions cache
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      # Build the image from app/ (not published yet) and load it into the runner's Docker;
-      # layers are cached between runs, so unchanged steps are not rebuilt
+      # Image name, tags and labels: sha-<commit> and main on main;
+      # X.Y.Z and X.Y on version tags; never latest.
+      # The labels are part of the image, so they are added here, in the only build
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          flavor: |
+            latest=false
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      # Build once: load the image into the runner's Docker for the tests below,
+      # and save the same build as an OCI archive for the Publish job.
+      # provenance: false: no unsigned BuildKit attestation, so the image is a single manifest
+      # (the signed provenance is created by the Publish job); layers are cached between runs
       - name: Build image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: app
           push: false
           load: true
+          outputs: type=oci,dest=${{ runner.temp }}/image.tar
           tags: devops-pipeline-e2e:ci
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Prove that the image in Docker (tested below) and the archive (published later) are the same:
+      # same config digest (the image ID). Then read the image digest from the archive
+      - name: Check archive and read digest
+        id: archive
+        env:
+          ARCHIVE: ${{ runner.temp }}/image.tar
+        run: |
+          INDEX="$(tar -xOf "${ARCHIVE}" index.json)"
+          test "$(echo "${INDEX}" | jq '.manifests | length')" = "1"
+          test "$(echo "${INDEX}" | jq -r '.manifests[0].mediaType')" = "application/vnd.oci.image.manifest.v1+json"
+          DIGEST="$(echo "${INDEX}" | jq -r '.manifests[0].digest')"
+          ARCHIVE_CONFIG="$(tar -xOf "${ARCHIVE}" "blobs/sha256/${DIGEST#sha256:}" | jq -r '.config.digest')"
+          LOADED_ID="$(docker image inspect devops-pipeline-e2e:ci --format '{{.Id}}')"
+          echo "Image digest:     ${DIGEST}"
+          echo "Archive config:   ${ARCHIVE_CONFIG}"
+          echo "Tested image ID:  ${LOADED_ID}"
+          test "${ARCHIVE_CONFIG}" = "${LOADED_ID}"
+          echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
 
       # Smoke test: the container starts and answers on /health within 10 seconds
       - name: Smoke test
@@ -91,6 +135,17 @@ jobs:
             image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress \
             devops-pipeline-e2e:ci
 
+      # Keep the tested image for the Publish job; only reached when every check above passed.
+      # Kept for one day; the layers are already compressed, so no compression here
+      - name: Upload image archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image
+          path: ${{ runner.temp }}/image.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
   publish:
     name: Publish
     # Only publish an image that was built, smoke tested and scanned
@@ -104,27 +159,33 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+    # Digest of the image tested by the Image job: the only image this job pushes and signs
+    env:
+      DIGEST: ${{ needs.image.outputs.digest }}
     steps:
+      # The repository is only needed for .github/trivy/Dockerfile (Generate SBOM)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      # Image name, tags and labels: sha-<commit> and main on main;
-      # X.Y.Z and X.Y on version tags; never latest
-      - name: Image metadata
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+      # The image archive tested by the Image job, no rebuild here;
+      # the download fails if the file does not match the one that was uploaded
+      - name: Download image archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          images: ghcr.io/${{ github.repository }}
-          flavor: |
-            latest=false
-          tags: |
-            type=sha
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+          name: image
+          path: ${{ runner.temp }}
+
+      # Before logging in: the archive must hold the tested image (same digest)
+      - name: Check archive digest
+        env:
+          ARCHIVE: ${{ runner.temp }}/image.tar
+        run: |
+          ARCHIVE_DIGEST="$(tar -xOf "${ARCHIVE}" index.json | jq -r '.manifests[0].digest')"
+          echo "Tested digest:  ${DIGEST}"
+          echo "Archive digest: ${ARCHIVE_DIGEST}"
+          test -n "${DIGEST}"
+          test "${ARCHIVE_DIGEST}" = "${DIGEST}"
 
       # Log in with the short-lived token GitHub creates for this run; no stored secrets
       - name: Log in to GHCR
@@ -134,16 +195,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Rebuild from the cache written by the Image job (same layers) and push
-      - name: Build and push image
-        id: push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: app
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
+      # Push the tested image as it is, once per tag; skopeo (preinstalled on the runner)
+      # uses the login above, and --preserve-digests fails instead of changing the digest
+      - name: Push image
+        env:
+          ARCHIVE: ${{ runner.temp }}/image.tar
+          TAGS: ${{ needs.image.outputs.tags }}
+        run: |
+          for TAG in ${TAGS}; do
+            echo "Pushing ${TAG}"
+            skopeo copy --preserve-digests "oci-archive:${ARCHIVE}" "docker://${TAG}"
+          done
+
+      # Every tag in the registry must point to the tested image
+      - name: Check registry digest
+        env:
+          TAGS: ${{ needs.image.outputs.tags }}
+        run: |
+          for TAG in ${TAGS}; do
+            REMOTE_DIGEST="$(skopeo inspect --format '{{.Digest}}' "docker://${TAG}")"
+            echo "${TAG} -> ${REMOTE_DIGEST}"
+            test "${REMOTE_DIGEST}" = "${DIGEST}"
+          done
 
       # Signed provenance: proves this image (by digest) was built by this workflow, from this commit.
       # Keyless signing with a short-lived Sigstore certificate; stored in GitHub and next to the image in GHCR
@@ -151,7 +224,7 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ghcr.io/${{ github.repository }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ needs.image.outputs.digest }}
           push-to-registry: true
           # Storage records are only available for organization-owned repositories
           create-storage-record: false
@@ -159,7 +232,7 @@ jobs:
       # SBOM: the list of every package in the published image, generated by the pinned Trivy
       - name: Generate SBOM
         env:
-          IMAGE: ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository }}@${{ needs.image.outputs.digest }}
         run: |
           TRIVY_IMAGE="$(sed -n 's/^FROM //p' .github/trivy/Dockerfile)"
           test -n "${TRIVY_IMAGE}"
@@ -174,7 +247,7 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ghcr.io/${{ github.repository }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ needs.image.outputs.digest }}
           sbom-path: sbom.cdx.json
           push-to-registry: true
           create-storage-record: false
