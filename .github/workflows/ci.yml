@@ -130,7 +130,8 @@ jobs:
             --source-name "ghcr.io/${GITHUB_REPOSITORY}" \
             --output cyclonedx-json \
             > "${SBOM}"
-          echo "Components: $(jq '.components | length' "${SBOM}")"
+          echo "Components by type:"
+          jq -r '.components | group_by(.type)[] | "  \(.[0].type): \(length)"' "${SBOM}"
           jq -e 'any(.components[]; .name == "python")' "${SBOM}" > /dev/null
           jq -r '.components[] | select(.name == "python") | "Python interpreter: \(.version)"' "${SBOM}"
 
