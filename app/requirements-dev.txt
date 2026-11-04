@@ -1,5 +1,5 @@
 -r requirements.txt
-pytest==9.1.1
+pytest==9.2.0
 # pytest dependencies, pinned like the production ones
 iniconfig==2.3.1
 packaging==26.3
