@@ -53,6 +53,22 @@ updates:
       prefix: ci
       include: scope
 
+  # Syft image used by the CI to generate the SBOM (.github/syft/Dockerfile).
+  # The image is not signed: before merging an update, check that its binary matches
+  # the signed release (cosign verify-blob on the checksums, then compare the sha256)
+  - package-ecosystem: docker
+    directory: /.github/syft
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Lisbon
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+
   # GitHub Actions used by the workflows in .github/workflows
   - package-ecosystem: github-actions
     directory: /
