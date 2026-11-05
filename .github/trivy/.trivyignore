@@ -1,0 +1,8 @@
+# Vulnerabilities accepted after review: each one with the reason and an expiry date.
+# After the expiry date Trivy reports it again, so the exception has to be reviewed.
+
+# apt and libapt-pkg7.0 3.0.3 (from the python:3.12 slim-trixie base image), fixed in 3.0.4.
+# Only exploitable while apt downloads packages, and apt never runs in this image: the
+# Dockerfile installs with pip, and the app runs gunicorn as a non-root user.
+# Remove this exception when the base image ships apt 3.0.4 (Dependabot digest update).
+CVE-2026-109518 exp:2026-11-30
