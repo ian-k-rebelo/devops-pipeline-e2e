@@ -98,7 +98,9 @@ jobs:
           cache-to: type=gha,mode=max
 
       # Prove that the image in Docker (tested below) and the archive (published later) are the same:
-      # same config digest (the image ID). Then read the image digest from the archive
+      # same config digest (the image ID). Then read the image digest from the archive and check it
+      # with skopeo, which computes it from the manifest bytes: the same check as in the Publish job,
+      # so that it also runs on pull requests
       - name: Check archive and read digest
         id: archive
         env:
@@ -114,6 +116,9 @@ jobs:
           echo "Archive config:   ${ARCHIVE_CONFIG}"
           echo "Tested image ID:  ${LOADED_ID}"
           test "${ARCHIVE_CONFIG}" = "${LOADED_ID}"
+          COMPUTED_DIGEST="$(skopeo inspect --format '{{.Digest}}' "oci-archive:${ARCHIVE}")"
+          echo "Computed digest:  ${COMPUTED_DIGEST}"
+          test "${COMPUTED_DIGEST}" = "${DIGEST}"
           echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
 
       # SBOM: the list of every component in the tested image, the Python interpreter included,
@@ -166,44 +171,20 @@ jobs:
           docker logs smoke
           exit 1
 
-      # Vulnerability scan: fail on HIGH or CRITICAL vulnerabilities that already have a fix;
-      # Trivy is pinned by digest because its releases were compromised in March 2026.
-      # The image is read from .github/trivy/Dockerfile, so Dependabot can keep it up to date.
-      # Accepted vulnerabilities are read from .github/vex/openvex.json and still shown in the log
-      # as suppressed
+      # Vulnerability scan with Trivy, on the image in the runner's Docker: fail on HIGH or CRITICAL
+      # vulnerabilities that already have a fix, and show the accepted ones (.github/vex/openvex.json)
+      # as suppressed. Same script as the scheduled scan (.github/scripts/scan-trivy.sh); Trivy is
+      # pinned by digest in .github/trivy/Dockerfile because its releases were compromised in March 2026
       - name: Scan image for vulnerabilities
-        run: |
-          TRIVY_IMAGE="$(sed -n 's/^FROM //p' .github/trivy/Dockerfile)"
-          test -n "${TRIVY_IMAGE}"
-          echo "Trivy image: ${TRIVY_IMAGE}"
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock:ro \
-            -v "${PWD}/.github/vex/openvex.json:/vex/openvex.json:ro" \
-            "${TRIVY_IMAGE}" \
-            image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress \
-            --vex /vex/openvex.json --show-suppressed \
-            devops-pipeline-e2e:ci
+        run: .github/scripts/scan-trivy.sh local devops-pipeline-e2e:ci
 
       # Second vulnerability scan, with Grype on the SBOM: it also reads compiled binaries, such as
-      # the Python interpreter, which Trivy does not see. Same policy: fail on HIGH or CRITICAL
-      # vulnerabilities that already have a fix, show the others, and read the same VEX file.
-      # Grype is pinned by digest in .github/grype/Dockerfile; it runs as a non-root user, reads the
-      # SBOM and the VEX through read-only mounts and has no access to the Docker socket
+      # the Python interpreter, which Trivy does not see. Same policy and same VEX file; same script
+      # as the scheduled scan (.github/scripts/scan-grype.sh)
       - name: Scan SBOM for vulnerabilities
         env:
           SBOM: ${{ runner.temp }}/sbom.cdx.json
-        run: |
-          GRYPE_IMAGE="$(sed -n 's/^FROM //p' .github/grype/Dockerfile)"
-          test -n "${GRYPE_IMAGE}"
-          echo "Grype image: ${GRYPE_IMAGE}"
-          chmod a+r "${SBOM}"
-          docker run --rm \
-            -e GRYPE_CHECK_FOR_APP_UPDATE=false \
-            -v "${SBOM}:/in/sbom.cdx.json:ro" \
-            -v "${PWD}/.github/vex/openvex.json:/vex/openvex.json:ro" \
-            "${GRYPE_IMAGE}" \
-            sbom:/in/sbom.cdx.json --vex /vex/openvex.json \
-            --fail-on high --only-fixed --show-suppressed
+        run: .github/scripts/scan-grype.sh "${SBOM}"
 
       # Keep the tested image for the Publish job; only reached when every check above passed.
       # Kept for one day; the layers are already compressed, so no compression here
