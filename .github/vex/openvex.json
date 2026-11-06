@@ -1,0 +1,20 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/ian-k-rebelo/devops-pipeline-e2e/blob/main/.github/vex/openvex.json",
+  "author": "Ian Rebelo",
+  "timestamp": "2026-11-05T12:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": { "name": "CVE-2026-109518" },
+      "timestamp": "2026-11-05T12:00:00Z",
+      "products": [
+        { "@id": "pkg:deb/debian/apt@3.0.3" },
+        { "@id": "pkg:deb/debian/libapt-pkg7.0@3.0.3" }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "apt only comes with the base image and never runs: the Dockerfile installs with pip, and the app runs gunicorn as a non-root user."
+    }
+  ]
+}

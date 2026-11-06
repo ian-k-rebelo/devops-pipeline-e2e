@@ -69,6 +69,39 @@ updates:
       prefix: ci
       include: scope
 
+  # Grype image used by the CI to scan the SBOM (.github/grype/Dockerfile).
+  # The image is not signed: before merging an update, check that its binary matches
+  # the signed release (cosign verify-blob on the checksums, then compare the sha256)
+  - package-ecosystem: docker
+    directory: /.github/grype
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Lisbon
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+
+  # jq image: the CI and the local setup take jq from it (.github/jq/Dockerfile).
+  # Before merging an update, verify the image attestation (cosign verify-attestation) and
+  # check that its /jq binary matches the signed release; after merging, run
+  # .github/scripts/install-jq.sh ~/.local/bin to keep the local jq equal to the CI
+  - package-ecosystem: docker
+    directory: /.github/jq
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Lisbon
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+
   # GitHub Actions used by the workflows in .github/workflows
   - package-ecosystem: github-actions
     directory: /
