@@ -53,6 +53,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # jq pinned by digest in .github/jq/Dockerfile (kept up to date by Dependabot) instead of
+      # the one preinstalled on the runner, so the CI and the local setup use the same jq.
+      # GITHUB_PATH puts it first in the PATH of the next steps
+      - name: Install jq
+        run: |
+          .github/scripts/install-jq.sh "${RUNNER_TEMP}/bin"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
       # BuildKit builder, able to use the GitHub Actions cache
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -135,6 +143,16 @@ jobs:
           jq -e 'any(.components[]; .name == "python")' "${SBOM}" > /dev/null
           jq -r '.components[] | select(.name == "python") | "Python interpreter: \(.version)"' "${SBOM}"
 
+      # Accepted vulnerabilities are declared in .github/vex/openvex.json (OpenVEX), read by both
+      # scanners. OpenVEX has no expiry date, so this step fails when a statement is malformed or
+      # was last reviewed more than 30 days ago, and warns when its package is no longer in the image
+      - name: Check VEX exceptions
+        env:
+          SBOM: ${{ runner.temp }}/sbom.cdx.json
+        run: |
+          echo "jq: $(command -v jq) ($(jq --version))"
+          .github/scripts/check-vex.sh .github/vex/openvex.json "${SBOM}"
+
       # Smoke test: the container starts and answers on /health within 10 seconds
       - name: Smoke test
         run: |
@@ -151,8 +169,8 @@ jobs:
       # Vulnerability scan: fail on HIGH or CRITICAL vulnerabilities that already have a fix;
       # Trivy is pinned by digest because its releases were compromised in March 2026.
       # The image is read from .github/trivy/Dockerfile, so Dependabot can keep it up to date.
-      # Accepted vulnerabilities (each with a reason and an expiry date) are listed in
-      # .github/trivy/.trivyignore and still shown in the log as suppressed
+      # Accepted vulnerabilities are read from .github/vex/openvex.json and still shown in the log
+      # as suppressed
       - name: Scan image for vulnerabilities
         run: |
           TRIVY_IMAGE="$(sed -n 's/^FROM //p' .github/trivy/Dockerfile)"
@@ -160,11 +178,32 @@ jobs:
           echo "Trivy image: ${TRIVY_IMAGE}"
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock:ro \
-            -v "${PWD}/.github/trivy/.trivyignore:/trivy/.trivyignore:ro" \
+            -v "${PWD}/.github/vex/openvex.json:/vex/openvex.json:ro" \
             "${TRIVY_IMAGE}" \
             image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress \
-            --ignorefile /trivy/.trivyignore --show-suppressed \
+            --vex /vex/openvex.json --show-suppressed \
             devops-pipeline-e2e:ci
+
+      # Second vulnerability scan, with Grype on the SBOM: it also reads compiled binaries, such as
+      # the Python interpreter, which Trivy does not see. Same policy: fail on HIGH or CRITICAL
+      # vulnerabilities that already have a fix, show the others, and read the same VEX file.
+      # Grype is pinned by digest in .github/grype/Dockerfile; it runs as a non-root user, reads the
+      # SBOM and the VEX through read-only mounts and has no access to the Docker socket
+      - name: Scan SBOM for vulnerabilities
+        env:
+          SBOM: ${{ runner.temp }}/sbom.cdx.json
+        run: |
+          GRYPE_IMAGE="$(sed -n 's/^FROM //p' .github/grype/Dockerfile)"
+          test -n "${GRYPE_IMAGE}"
+          echo "Grype image: ${GRYPE_IMAGE}"
+          chmod a+r "${SBOM}"
+          docker run --rm \
+            -e GRYPE_CHECK_FOR_APP_UPDATE=false \
+            -v "${SBOM}:/in/sbom.cdx.json:ro" \
+            -v "${PWD}/.github/vex/openvex.json:/vex/openvex.json:ro" \
+            "${GRYPE_IMAGE}" \
+            sbom:/in/sbom.cdx.json --vex /vex/openvex.json \
+            --fail-on high --only-fixed --show-suppressed
 
       # Keep the tested image for the Publish job; only reached when every check above passed.
       # Kept for one day; the layers are already compressed, so no compression here
@@ -217,12 +256,14 @@ jobs:
           name: sbom
           path: ${{ runner.temp }}
 
-      # Before logging in: the archive must hold the tested image (same digest)
+      # Before logging in: the archive must hold the tested image (same digest).
+      # skopeo (already used below) computes the digest from the manifest bytes in the archive,
+      # so this job needs no jq and no checkout of the repository
       - name: Check archive digest
         env:
           ARCHIVE: ${{ runner.temp }}/image.tar
         run: |
-          ARCHIVE_DIGEST="$(tar -xOf "${ARCHIVE}" index.json | jq -r '.manifests[0].digest')"
+          ARCHIVE_DIGEST="$(skopeo inspect --format '{{.Digest}}' "oci-archive:${ARCHIVE}")"
           echo "Tested digest:  ${DIGEST}"
           echo "Archive digest: ${ARCHIVE_DIGEST}"
           test -n "${DIGEST}"
