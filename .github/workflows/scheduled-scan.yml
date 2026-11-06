@@ -1,0 +1,162 @@
+# Scheduled scan: every day, scan the image published on main with today's vulnerability data,
+# without rebuilding it. New vulnerabilities (and new fixes) are found on the day they are
+# published, and the VEX exceptions expire even when there are no commits.
+# If the scan fails, the Notify job opens an issue, or comments on the one already open;
+# when the scan passes again, it closes that issue.
+name: Scheduled scan
+
+on:
+  # Every day at 07:41 UTC: after the Trivy and Grype databases are rebuilt (06:00 UTC), and away
+  # from the start of the hour, when GitHub delays (or even drops) more scheduled runs
+  schedule:
+    - cron: "41 7 * * *"
+  # Run by hand from the Actions tab. test-notification makes the run fail on purpose, to test
+  # the issue; the next normal run closes it
+  workflow_dispatch:
+    inputs:
+      test-notification:
+        description: Fail on purpose to test the notification issue
+        type: boolean
+        default: false
+  # A pull request that changes this workflow or what it uses runs the scan (never the Notify job)
+  pull_request:
+    paths:
+      - .github/workflows/scheduled-scan.yml
+      - .github/scripts/**
+      - .github/vex/**
+      - .github/trivy/**
+      - .github/grype/**
+      - .github/jq/**
+
+# No permissions by default: each job asks only for what it needs
+permissions: {}
+
+# One run at a time for the same branch; a new run waits instead of cancelling the current one
+concurrency:
+  group: scheduled-scan-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  scan:
+    name: Scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.digest.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The same jq as the CI and the local setup (.github/jq/Dockerfile)
+      - name: Install jq
+        run: |
+          .github/scripts/install-jq.sh "${RUNNER_TEMP}/bin"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      # cosign 3.1.4, the same as the local setup. The action checks its bootstrap cosign against a
+      # checksum written in the action, and uses it to verify the signatures of this version.
+      # When Dependabot updates the action to v4.1.3, remove cosign-release (its default is 3.1.4)
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.4
+
+      # The digest that the main tag points to now. Every step below uses this digest, so the image
+      # whose signatures are verified is the image that is scanned, even if main moves meanwhile
+      - name: Read the digest of main
+        id: digest
+        run: |
+          DIGEST="$(skopeo inspect --format '{{.Digest}}' "docker://${IMAGE}:main")"
+          echo "${IMAGE}:main -> ${DIGEST}"
+          test -n "${DIGEST}"
+          echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
+
+      # Only scan an image that the CI built and signed on main: verify its signed build provenance
+      # and its signed SBOM, then take the SBOM from the verified attestation
+      - name: Verify attestations and extract the SBOM
+        id: sbom
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci.yml@refs/heads/main
+          ISSUER: https://token.actions.githubusercontent.com
+          SBOM: ${{ runner.temp }}/sbom.cdx.json
+        run: |
+          cosign verify-attestation --type https://slsa.dev/provenance/v1 \
+            --certificate-identity "${IDENTITY}" --certificate-oidc-issuer "${ISSUER}" \
+            "${IMAGE}@${DIGEST}" > /dev/null
+          cosign verify-attestation --type https://cyclonedx.org/bom \
+            --certificate-identity "${IDENTITY}" --certificate-oidc-issuer "${ISSUER}" \
+            "${IMAGE}@${DIGEST}" > "${RUNNER_TEMP}/sbom-attestation.json"
+          head -n 1 "${RUNNER_TEMP}/sbom-attestation.json" | jq -r '.payload' | base64 -d | jq '.predicate' > "${SBOM}"
+          jq -r '.components[] | select(.name == "python") | "Python interpreter: \(.version)"' "${SBOM}"
+
+      # The three checks run even when one of them fails, so the log shows every problem at once
+      - name: Check VEX exceptions
+        if: ${{ !cancelled() && steps.sbom.outcome == 'success' }}
+        env:
+          SBOM: ${{ runner.temp }}/sbom.cdx.json
+        run: |
+          echo "jq: $(command -v jq) ($(jq --version))"
+          .github/scripts/check-vex.sh .github/vex/openvex.json "${SBOM}"
+
+      - name: Scan image for vulnerabilities
+        if: ${{ !cancelled() && steps.sbom.outcome == 'success' }}
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: .github/scripts/scan-trivy.sh remote "${IMAGE}@${DIGEST}"
+
+      - name: Scan SBOM for vulnerabilities
+        if: ${{ !cancelled() && steps.sbom.outcome == 'success' }}
+        env:
+          SBOM: ${{ runner.temp }}/sbom.cdx.json
+        run: .github/scripts/scan-grype.sh "${SBOM}"
+
+      - name: Fail on purpose (notification test)
+        if: ${{ !cancelled() && inputs.test-notification }}
+        run: |
+          echo "::error title=Notification test::This run fails on purpose to test the notification issue"
+          exit 1
+
+  notify:
+    name: Notify
+    needs: scan
+    # Only scheduled and manual runs open or close issues, never pull requests
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # The only job that can write: it opens, comments on and closes issues
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RESULT: ${{ needs.scan.result }}
+      DIGEST: ${{ needs.scan.outputs.digest }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open, update or close the issue
+        run: |
+          LABEL=scheduled-scan
+          gh label create "${LABEL}" --force --color B60205 \
+            --description "Opened and closed by the scheduled scan"
+          OPEN_ISSUE="$(gh issue list --state open --label "${LABEL}" --json number --jq '.[0].number // empty')"
+          if [[ "${RESULT}" == "success" ]]; then
+            if [[ -n "${OPEN_ISSUE}" ]]; then
+              gh issue close "${OPEN_ISSUE}" --comment "The scheduled scan passed again: ${RUN_URL}"
+            else
+              echo "The scan passed and there is no open issue"
+            fi
+            exit 0
+          fi
+          BODY="The scheduled scan of \`${IMAGE}@${DIGEST:-unknown}\` failed (result: ${RESULT}).
+          See the log of the run: ${RUN_URL}"
+          if [[ -n "${OPEN_ISSUE}" ]]; then
+            gh issue comment "${OPEN_ISSUE}" --body "${BODY}"
+          else
+            gh issue create --title "Scheduled scan failed" --label "${LABEL}" --body "${BODY}"
+          fi
