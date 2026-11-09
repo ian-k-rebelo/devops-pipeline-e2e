@@ -67,6 +67,26 @@ flowchart LR
 - Every check runs on every pull request. A workflow skipped by a `paths` filter would leave its
   required check waiting forever, so the Tool images workflow always runs and decides inside
   (with no tool change it passes without verifying anything).
+- Every pull request starts from `.github/pull_request_template.md`: what changes and why, how it
+  was tested, and a checklist (Conventional Commits title, tests, secrets, pinned versions, VEX,
+  documentation). `.github/CODEOWNERS` names who reviews each path.
+
+**Team mode** (when a second maintainer joins)
+
+The project has one maintainer, and nobody can approve their own pull request, so no approval is
+required today (section 8). When a second maintainer joins:
+
+1. Add them to `.github/CODEOWNERS`, at least for `/.github/` and `docs/ci-security.md`. Every
+   path needs at least two owners (or a team): nobody can approve their own pull request, so a
+   path with a single owner would block that owner's own changes.
+2. In the `protect-main` ruleset, under *Require a pull request before merging*, set
+   *Required approvals* to 1 and turn on *Dismiss stale pull request approvals when new commits
+   are pushed*, *Require review from Code Owners*, *Require approval of the most recent
+   reviewable push* and *Require conversation resolution before merging*.
+3. Keep the bypass list empty.
+
+In an organization, CODEOWNERS would name teams instead of people, and members would need
+two-factor authentication.
 
 ## 3. Supply chain
 
@@ -240,8 +260,9 @@ points `verify-tool-image.sh` at another Dockerfile; both exist only for tests.
   merged, publish or reach secrets (the jobs only read, and there are none), but it runs on the
   temporary runner and can lie about that pull request's scan. Planned: verify the tool first.
 - **No second reviewer:** the project has one maintainer, and GitHub does not let authors approve
-  their own pull requests, so no approval is required; the required checks are the review. In a
-  team, at least one approval from someone other than the author would be required.
+  their own pull requests, so no approval is required. Compensating controls: the required
+  checks, the empty bypass list, the approval of outside pull requests, CODEOWNERS and the pull
+  request checklist. The settings for a team are ready (section 2, *Team mode*).
 - **Only `linux/amd64`** binaries of the tools are compared, the platform of the runners.
 - **Scheduled runs can be late:** GitHub delays them under load (a delay of more than 6 hours has
   been seen). One run a day is still enough.
