@@ -39,7 +39,8 @@ updates:
       prefix: build
       include: scope
 
-  # Trivy image used by the CI scan (.github/trivy/Dockerfile)
+  # Trivy image used by the CI and the scheduled scan (.github/trivy/Dockerfile).
+  # The required check Verify tool images verifies each update against the signed release
   - package-ecosystem: docker
     directory: /.github/trivy
     schedule:
@@ -54,8 +55,7 @@ updates:
       include: scope
 
   # Syft image used by the CI to generate the SBOM (.github/syft/Dockerfile).
-  # The image is not signed: before merging an update, check that its binary matches
-  # the signed release (cosign verify-blob on the checksums, then compare the sha256)
+  # The required check Verify tool images verifies each update against the signed release
   - package-ecosystem: docker
     directory: /.github/syft
     schedule:
@@ -69,9 +69,8 @@ updates:
       prefix: ci
       include: scope
 
-  # Grype image used by the CI to scan the SBOM (.github/grype/Dockerfile).
-  # The image is not signed: before merging an update, check that its binary matches
-  # the signed release (cosign verify-blob on the checksums, then compare the sha256)
+  # Grype image used by the CI and the scheduled scan to scan the SBOM (.github/grype/Dockerfile).
+  # The required check Verify tool images verifies each update against the signed release
   - package-ecosystem: docker
     directory: /.github/grype
     schedule:
@@ -86,9 +85,8 @@ updates:
       include: scope
 
   # jq image: the CI and the local setup take jq from it (.github/jq/Dockerfile).
-  # Before merging an update, verify the image attestation (cosign verify-attestation) and
-  # check that its /jq binary matches the signed release; after merging, run
-  # .github/scripts/install-jq.sh ~/.local/bin to keep the local jq equal to the CI
+  # The required check Verify tool images verifies each update against the signed release;
+  # after merging, run .github/scripts/install-jq.sh ~/.local/bin to keep the local jq equal to the CI
   - package-ecosystem: docker
     directory: /.github/jq
     schedule:
