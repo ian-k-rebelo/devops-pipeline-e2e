@@ -76,7 +76,9 @@ flowchart LR
 The project has one maintainer, and nobody can approve their own pull request, so no approval is
 required today (section 8). When a second maintainer joins:
 
-1. Add them to `.github/CODEOWNERS`, at least for `/.github/` and `docs/ci-security.md`.
+1. Add them to `.github/CODEOWNERS`, at least for `/.github/` and `docs/ci-security.md`. Every
+   path needs at least two owners (or a team): nobody can approve their own pull request, so a
+   path with a single owner would block that owner's own changes.
 2. In the `protect-main` ruleset, under *Require a pull request before merging*, set
    *Required approvals* to 1 and turn on *Dismiss stale pull request approvals when new commits
    are pushed*, *Require review from Code Owners*, *Require approval of the most recent
