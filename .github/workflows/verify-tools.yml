@@ -1,0 +1,102 @@
+# Tool images: checks that the tool images pinned in .github/<tool>/Dockerfile (Trivy, Syft, Grype
+# and jq) are the official images of their versions, with .github/scripts/verify-tool-image.sh.
+# On pull requests it always runs, because it is a required check, and verifies only the tools
+# whose Dockerfile changed (all of them when the script or this workflow changed); with no tool
+# change it passes without verifying anything. Run by hand, it verifies all four, for audits:
+# the job summary lists the result of each tool.
+name: Tool images
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+# No permissions by default: the job asks only for what it needs
+permissions: {}
+
+# A new push to the same pull request cancels the run that is still going
+concurrency:
+  group: tool-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify tool images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      # Two commits: on a pull request, HEAD is the merge of the pull request into the base branch
+      # and HEAD^1 is the base branch, so "git diff HEAD^1 HEAD" is what the pull request changes
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Choose the tools to verify
+        id: tools
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          ALL="trivy syft grype jq"
+          if [[ "${EVENT}" != "pull_request" ]]; then
+            TOOLS="${ALL}"
+          else
+            CHANGED="$(git diff --name-only HEAD^1 HEAD)"
+            echo "Files changed by the pull request:"
+            echo "${CHANGED}"
+            if grep -qxE '\.github/(scripts/verify-tool-image\.sh|workflows/verify-tools\.yml)' <<< "${CHANGED}"; then
+              TOOLS="${ALL}"
+            else
+              TOOLS=""
+              for t in ${ALL}; do
+                if grep -qx "\.github/${t}/Dockerfile" <<< "${CHANGED}"; then
+                  TOOLS="${TOOLS} ${t}"
+                fi
+              done
+            fi
+          fi
+          TOOLS="$(xargs <<< "${TOOLS}")"
+          echo "Tools to verify: ${TOOLS:-none}"
+          echo "tools=${TOOLS}" >> "${GITHUB_OUTPUT}"
+
+      # cosign 3.1.4, the same as the scheduled scan and the local setup. The action checks its
+      # bootstrap cosign against a checksum written in the action, and uses it to verify this version.
+      # When Dependabot updates the action to v4.1.3, remove cosign-release (its default is 3.1.4)
+      - if: steps.tools.outputs.tools != ''
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.4
+
+      # Verifies every chosen tool, even after a failure, so one run shows every problem
+      - name: Verify the tool images
+        env:
+          TOOLS: ${{ steps.tools.outputs.tools }}
+        run: |
+          {
+            echo "## Tool images"
+            echo
+            echo "Commit \`${GITHUB_SHA}\`, verified on $(date -u '+%Y-%m-%d %H:%M UTC')."
+            echo
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [[ -z "${TOOLS}" ]]; then
+            echo "No tool image changed in this pull request: nothing to verify." | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          {
+            echo "| Tool | Tag | Digest | Verification | Result |"
+            echo "|---|---|---|---|---|"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          FAILED=""
+          for t in ${TOOLS}; do
+            echo "::group::${t}"
+            if ! .github/scripts/verify-tool-image.sh "${t}"; then
+              FAILED="${FAILED} ${t}"
+            fi
+            echo "::endgroup::"
+          done
+          if [[ -n "${FAILED}" ]]; then
+            echo "::error title=Tool images::verification failed for:${FAILED}"
+            exit 1
+          fi
+          echo "All tool images verified: ${TOOLS}"
