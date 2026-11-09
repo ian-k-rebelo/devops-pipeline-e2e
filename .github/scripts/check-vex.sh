@@ -7,6 +7,9 @@
 #     so the statement can be removed.
 # Only "not_affected" statements with a justification, an impact statement and
 # packages pinned to a version (pkg:type/namespace/name@version) are accepted.
+# A Debian package with an epoch (version 1:...) needs two products: the version with the
+# epoch, as in the SBOM (read by Grype), and the version without it (read by Trivy, which
+# moves the epoch to a qualifier).
 # To renew a statement after a review, set its last_updated to the review date.
 # Usage: check-vex.sh <openvex.json> [sbom.cdx.json]
 # VEX_TODAY (YYYY-MM-DD) replaces today's date, only to test the expiry locally.
@@ -17,10 +20,11 @@ SBOM="${2:-}"
 MAX_AGE_DAYS="${MAX_AGE_DAYS:-30}"
 TODAY="${VEX_TODAY:-$(date -u +%F)}"
 
-# Package URLs in the image, without qualifiers (?arch=...&distro=...)
+# Package URLs in the image, without qualifiers (?arch=...&distro=...); a version with an
+# epoch is also listed without it, so that both products of a Debian package are found
 PURLS="null"
 if [[ -n "${SBOM}" ]]; then
-  PURLS="$(jq -c '[.. | objects | .purl? // empty | split("?")[0]] | unique' "${SBOM}")"
+  PURLS="$(jq -c '[.. | objects | .purl? // empty | split("?")[0] | ., sub("@[0-9]+(%3A|:)"; "@")] | unique' "${SBOM}")"
 fi
 
 # One line per finding: level <TAB> vulnerability <TAB> message
