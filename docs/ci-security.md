@@ -76,9 +76,9 @@ flowchart LR
 The project has one maintainer, and nobody can approve their own pull request, so no approval is
 required today (section 8). When a second maintainer joins:
 
-1. Add them to `.github/CODEOWNERS`, at least for `/.github/` and `docs/ci-security.md`. Every
-   path needs at least two owners (or a team): nobody can approve their own pull request, so a
-   path with a single owner would block that owner's own changes.
+1. Add them to `.github/CODEOWNERS`, at least for `/.github/`, `/tools/` and
+   `docs/ci-security.md`. Every path needs at least two owners (or a team): nobody can approve
+   their own pull request, so a path with a single owner would block that owner's own changes.
 2. In the `protect-main` ruleset, under *Require a pull request before merging*, set
    *Required approvals* to 1 and turn on *Dismiss stale pull request approvals when new commits
    are pushed*, *Require review from Code Owners*, *Require approval of the most recent
@@ -97,11 +97,17 @@ two-factor authentication.
 | Base image | `app/Dockerfile` | Tag and digest |
 | Python libraries | `app/requirements*.txt` | Exact versions |
 | GitHub Actions | `.github/workflows/*.yml` | Full commit SHA (version in a comment) |
-| Trivy, Syft, Grype, jq, hadolint, ShellCheck, Go toolchain | `.github/<tool>/Dockerfile` | Tag and digest |
-| actionlint, kubeconform, kustomize (Go tools) | `.github/tools/go.mod` | Exact versions, and the hash of every module in `.github/tools/go.sum` |
+| Trivy, Syft, Grype, jq, hadolint, ShellCheck, Go toolchain | `tools/<tool>/Dockerfile` | Tag and digest |
+| actionlint, kubeconform, kustomize (Go tools) | `tools/go/go.mod` | Exact versions, and the hash of every module in `tools/go/go.sum` |
 
 The tool Dockerfiles are never built: the scripts read the image from their `FROM` line. They
 exist so that Dependabot can propose new versions.
+
+The tool pins live in `tools/`, outside `.github/`: Dependabot cannot open a pull request that
+changes a file under `.github/` for any ecosystem other than GitHub Actions. GitHub refuses it
+with "The request contains invalid or unauthorized changes". This is not documented by GitHub
+(see dependabot/dependabot-core#15237), and it was found when the first Syft and Grype updates
+failed.
 
 **Updates**
 
@@ -128,11 +134,11 @@ Docker pulls by digest and ignores the tag, so without this check a pull request
 harmless tag with the digest of another image, and every other check would still pass. Only the
 `linux/amd64` binary is compared: it is the one the runners execute.
 
-**Go tools** (`.github/tools/go.mod`)
+**Go tools** (`tools/go/go.mod`)
 
 actionlint, kubeconform and kustomize are built from source with the Go toolchain image
-(`.github/golang/Dockerfile`, a Docker Official Image pinned by digest, like the base image of
-the application). The Go toolchain checks every module against `.github/tools/go.sum`, and the
+(`tools/golang/Dockerfile`, a Docker Official Image pinned by digest, like the base image of
+the application). The Go toolchain checks every module against `tools/go/go.sum`, and the
 hashes in `go.sum` are checked against the public Go checksum database, an append-only log: every
 user gets exactly the same code for a version, and published code cannot be replaced.
 

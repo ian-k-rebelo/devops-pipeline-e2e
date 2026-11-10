@@ -39,10 +39,10 @@ updates:
       prefix: build
       include: scope
 
-  # Trivy image used by the CI and the scheduled scan (.github/trivy/Dockerfile).
+  # Trivy image used by the CI and the scheduled scan (tools/trivy/Dockerfile).
   # The required check Verify tool images verifies each update against the signed release
   - package-ecosystem: docker
-    directory: /.github/trivy
+    directory: /tools/trivy
     schedule:
       interval: weekly
       day: monday
@@ -54,10 +54,10 @@ updates:
       prefix: ci
       include: scope
 
-  # Syft image used by the CI to generate the SBOM (.github/syft/Dockerfile).
+  # Syft image used by the CI to generate the SBOM (tools/syft/Dockerfile).
   # The required check Verify tool images verifies each update against the signed release
   - package-ecosystem: docker
-    directory: /.github/syft
+    directory: /tools/syft
     schedule:
       interval: weekly
       day: monday
@@ -69,10 +69,10 @@ updates:
       prefix: ci
       include: scope
 
-  # Grype image used by the CI and the scheduled scan to scan the SBOM (.github/grype/Dockerfile).
+  # Grype image used by the CI and the scheduled scan to scan the SBOM (tools/grype/Dockerfile).
   # The required check Verify tool images verifies each update against the signed release
   - package-ecosystem: docker
-    directory: /.github/grype
+    directory: /tools/grype
     schedule:
       interval: weekly
       day: monday
@@ -84,11 +84,11 @@ updates:
       prefix: ci
       include: scope
 
-  # jq image: the CI and the local setup take jq from it (.github/jq/Dockerfile).
+  # jq image: the CI and the local setup take jq from it (tools/jq/Dockerfile).
   # The required check Verify tool images verifies each update against the signed release;
   # after merging, run .github/scripts/install-jq.sh ~/.local/bin to keep the local jq equal to the CI
   - package-ecosystem: docker
-    directory: /.github/jq
+    directory: /tools/jq
     schedule:
       interval: weekly
       day: monday
@@ -100,10 +100,10 @@ updates:
       prefix: ci
       include: scope
 
-  # hadolint image: lints the Dockerfiles (.github/hadolint/Dockerfile).
+  # hadolint image: lints the Dockerfiles (tools/hadolint/Dockerfile).
   # The required check Verify tool images verifies each update against the signed release
   - package-ecosystem: docker
-    directory: /.github/hadolint
+    directory: /tools/hadolint
     schedule:
       interval: weekly
       day: monday
@@ -115,10 +115,10 @@ updates:
       prefix: ci
       include: scope
 
-  # ShellCheck image: lints the shell scripts (.github/shellcheck/Dockerfile).
+  # ShellCheck image: lints the shell scripts (tools/shellcheck/Dockerfile).
   # ShellCheck publishes no signatures: Verify tool images compares the image with the release
   - package-ecosystem: docker
-    directory: /.github/shellcheck
+    directory: /tools/shellcheck
     schedule:
       interval: weekly
       day: monday
@@ -130,9 +130,9 @@ updates:
       prefix: ci
       include: scope
 
-  # Go toolchain image that builds the Go tools (.github/golang/Dockerfile)
+  # Go toolchain image that builds the Go tools (tools/golang/Dockerfile)
   - package-ecosystem: docker
-    directory: /.github/golang
+    directory: /tools/golang
     schedule:
       interval: weekly
       day: monday
@@ -144,10 +144,10 @@ updates:
       prefix: ci
       include: scope
 
-  # Go tools (actionlint, kubeconform, kustomize) in .github/tools/go.mod; the Go toolchain checks
-  # every module against .github/tools/go.sum and the public Go checksum database
+  # Go tools (actionlint, kubeconform, kustomize) in tools/go/go.mod; the Go toolchain checks
+  # every module against tools/go/go.sum and the public Go checksum database
   - package-ecosystem: gomod
-    directory: /.github/tools
+    directory: /tools/go
     schedule:
       interval: weekly
       day: monday

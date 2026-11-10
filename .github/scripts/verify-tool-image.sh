@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifies that the tool image pinned in .github/<tool>/Dockerfile is the official image of the
+# Verifies that the tool image pinned in tools/<tool>/Dockerfile is the official image of the
 # version in its tag:
 #   - who built it: a signature or attestation made by the tool's own release workflow, from the
 #     commit of that version's tag (cosign, keyless, recorded in the Rekor transparency log);
@@ -23,7 +23,7 @@ case "${TOOL}" in
 esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DOCKERFILE="${TOOL_DOCKERFILE:-${REPO_ROOT}/.github/${TOOL}/Dockerfile}"
+DOCKERFILE="${TOOL_DOCKERFILE:-${REPO_ROOT}/tools/${TOOL}/Dockerfile}"
 ISSUER=https://token.actions.githubusercontent.com
 RESULT="✅"
 WORK="$(mktemp -d)"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs jq from the image pinned in .github/jq/Dockerfile, so that the CI and the
+# Installs jq from the image pinned in tools/jq/Dockerfile, so that the CI and the
 # local setup use exactly the same jq binary, and Dependabot keeps it up to date.
 # The image is FROM scratch (it only has /jq), so the binary is copied out of a
 # container that is created but never started.
@@ -9,7 +9,7 @@ set -euo pipefail
 
 DEST="${1:?usage: install-jq.sh <destination directory>}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DOCKERFILE="${JQ_DOCKERFILE:-${REPO_ROOT}/.github/jq/Dockerfile}"
+DOCKERFILE="${JQ_DOCKERFILE:-${REPO_ROOT}/tools/jq/Dockerfile}"
 
 JQ_IMAGE="$(sed -n 's/^FROM //p' "${DOCKERFILE}")"
 if [[ ! "${JQ_IMAGE}" =~ @sha256:[0-9a-f]{64}$ ]]; then

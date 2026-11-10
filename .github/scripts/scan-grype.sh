@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Scans an SBOM (CycloneDX JSON) with the Grype image pinned in .github/grype/Dockerfile.
+# Scans an SBOM (CycloneDX JSON) with the Grype image pinned in tools/grype/Dockerfile.
 # Grype also reads compiled binaries listed in the SBOM, such as the Python interpreter,
 # which Trivy does not see. Same policy as Trivy: fail on HIGH or CRITICAL vulnerabilities
 # that already have a fix, show the others, and read the accepted ones from
@@ -12,7 +12,7 @@ set -euo pipefail
 SBOM="$(realpath "${1:?usage: scan-grype.sh <sbom.cdx.json>}")"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-GRYPE_IMAGE="$(sed -n 's/^FROM //p' "${REPO_ROOT}/.github/grype/Dockerfile")"
+GRYPE_IMAGE="$(sed -n 's/^FROM //p' "${REPO_ROOT}/tools/grype/Dockerfile")"
 test -n "${GRYPE_IMAGE}"
 echo "Grype image: ${GRYPE_IMAGE}"
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Scans a container image with the Trivy image pinned in .github/trivy/Dockerfile.
+# Scans a container image with the Trivy image pinned in tools/trivy/Dockerfile.
 # Policy: fail on HIGH or CRITICAL vulnerabilities that already have a fix, and show the
 # accepted ones (read from .github/vex/openvex.json) as suppressed. Trivy also looks for
 # secrets in the image files. With --skip-version-check and --disable-telemetry together,
@@ -33,7 +33,7 @@ case "${MODE}" in
     ;;
 esac
 
-TRIVY_IMAGE="$(sed -n 's/^FROM //p' "${REPO_ROOT}/.github/trivy/Dockerfile")"
+TRIVY_IMAGE="$(sed -n 's/^FROM //p' "${REPO_ROOT}/tools/trivy/Dockerfile")"
 test -n "${TRIVY_IMAGE}"
 echo "Trivy image: ${TRIVY_IMAGE}"
 

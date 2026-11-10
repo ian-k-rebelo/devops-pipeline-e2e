@@ -24,9 +24,9 @@ on:
       - .github/workflows/scheduled-scan.yml
       - .github/scripts/**
       - .github/vex/**
-      - .github/trivy/**
-      - .github/grype/**
-      - .github/jq/**
+      - tools/trivy/**
+      - tools/grype/**
+      - tools/jq/**
 
 # No permissions by default: each job asks only for what it needs
 permissions: {}
@@ -53,7 +53,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # The same jq as the CI and the local setup (.github/jq/Dockerfile)
+      # The same jq as the CI and the local setup (tools/jq/Dockerfile)
       - name: Install jq
         run: |
           .github/scripts/install-jq.sh "${RUNNER_TEMP}/bin"
