@@ -5,8 +5,9 @@
 # Everything else
 *                       @ian-k-rebelo
 
-# Pipeline, supply chain and security policy (includes this file)
+# Pipeline, pinned tools, supply chain and security policy (includes this file)
 /.github/               @ian-k-rebelo
+/tools/                 @ian-k-rebelo
 /docs/ci-security.md    @ian-k-rebelo
 
 # Application, image and deployment

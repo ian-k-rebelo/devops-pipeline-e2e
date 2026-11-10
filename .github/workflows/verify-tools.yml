@@ -1,4 +1,4 @@
-# Tool images: checks that the tool images pinned in .github/<tool>/Dockerfile (Trivy, Syft, Grype,
+# Tool images: checks that the tool images pinned in tools/<tool>/Dockerfile (Trivy, Syft, Grype,
 # jq, hadolint and ShellCheck) are the official images of their versions, with
 # .github/scripts/verify-tool-image.sh.
 # On pull requests it always runs, because it is a required check, and verifies only the tools
@@ -51,7 +51,7 @@ jobs:
             else
               TOOLS=""
               for t in ${ALL}; do
-                if grep -qx "\.github/${t}/Dockerfile" <<< "${CHANGED}"; then
+                if grep -qx "tools/${t}/Dockerfile" <<< "${CHANGED}"; then
                   TOOLS="${TOOLS} ${t}"
                 fi
               done
@@ -61,7 +61,7 @@ jobs:
           echo "Tools to verify: ${TOOLS:-none}"
           echo "tools=${TOOLS}" >> "${GITHUB_OUTPUT}"
 
-      # jq reads the hadolint attestation; the same jq as the CI (.github/jq/Dockerfile)
+      # jq reads the hadolint attestation; the same jq as the CI (tools/jq/Dockerfile)
       - name: Install jq
         if: steps.tools.outputs.tools != ''
         run: |
