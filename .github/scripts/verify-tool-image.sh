@@ -3,25 +3,29 @@
 # version in its tag:
 #   - who built it: a signature or attestation made by the tool's own release workflow, from the
 #     commit of that version's tag (cosign, keyless, recorded in the Rekor transparency log);
-#   - for the images that are not signed themselves (Syft, Grype) and for jq, that the binary in
-#     the image (linux/amd64, the platform of the CI) is byte for byte the binary of that release.
+#   - for the images that are not signed themselves (Syft, Grype, hadolint) and for jq, that the
+#     binary in the image (linux/amd64, the platform of the CI) is byte for byte the binary of that
+#     release.
+# ShellCheck publishes no signatures: its binary is only compared with the binary of the release.
 # Used by .github/workflows/verify-tools.yml on pull requests that change a tool image, and by hand
 # to audit all of them.
-# Usage: verify-tool-image.sh trivy|syft|grype|jq
-# Needs: docker, cosign, git, curl, sha256sum. Adds a row to $GITHUB_STEP_SUMMARY when it is set.
+# Usage: verify-tool-image.sh trivy|syft|grype|jq|hadolint|shellcheck
+# Needs: docker, cosign, git, curl, jq, sha256sum. Adds a row to $GITHUB_STEP_SUMMARY when it is set.
+# GITHUB_TOKEN, when set, authenticates the requests to the GitHub API (higher rate limit).
 # TOOL_DOCKERFILE replaces the path of the Dockerfile, only to test this script.
 set -euo pipefail
 
-USAGE="usage: verify-tool-image.sh trivy|syft|grype|jq"
+USAGE="usage: verify-tool-image.sh trivy|syft|grype|jq|hadolint|shellcheck"
 TOOL="${1:?${USAGE}}"
 case "${TOOL}" in
-  trivy | syft | grype | jq) ;;
+  trivy | syft | grype | jq | hadolint | shellcheck) ;;
   *) echo "${USAGE}" >&2; exit 1 ;;
 esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOCKERFILE="${TOOL_DOCKERFILE:-${REPO_ROOT}/.github/${TOOL}/Dockerfile}"
 ISSUER=https://token.actions.githubusercontent.com
+RESULT="✅"
 WORK="$(mktemp -d)"
 # On exit: delete the work folder and, if the check failed, add a failed row to the summary
 finish() {
@@ -169,15 +173,63 @@ verify_jq() {
   METHOD="image and release binary attested by the jq release workflow at ${tag}, and the binary in the image is the release binary"
 }
 
+# hadolint: the release binaries are attested by the release workflow, which runs on master and
+# tags that commit. The attestation is read from the GitHub API, and the binary in the image must
+# be the attested release binary
+verify_hadolint() {
+  read_image
+  local repo=hadolint/hadolint
+  local tag="${TAG}"
+  local binary=hadolint-linux-x86_64
+  local sha digest
+  local auth=()
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  fi
+  sha="$(tag_commit "${repo}" "${tag}")"
+  download "${repo}" "${tag}" "${binary}"
+  digest="$(sha256sum "${WORK}/${binary}" | cut -d ' ' -f 1)"
+  curl -fsSL --retry 3 "${auth[@]}" -o "${WORK}/attestations.json" \
+    "https://api.github.com/repos/${repo}/attestations/sha256:${digest}"
+  jq -e '.attestations[0].bundle' "${WORK}/attestations.json" > "${WORK}/bundle.json"
+  cosign verify-blob-attestation "${WORK}/${binary}" \
+    --bundle "${WORK}/bundle.json" \
+    --type https://slsa.dev/provenance/v1 \
+    --certificate-identity "https://github.com/${repo}/.github/workflows/release.yml@refs/heads/master" \
+    --certificate-oidc-issuer "${ISSUER}" \
+    --certificate-github-workflow-sha "${sha}"
+  extract_binary /bin/hadolint
+  same_file "${WORK}/image-binary" "${WORK}/${binary}"
+  METHOD="release binary attested by the hadolint release workflow at the ${tag} commit, and the binary in the image is the release binary"
+}
+
+# ShellCheck publishes no signatures or checksums: the only check is that the binary in the image
+# (Docker Hub) is the binary of the GitHub release, two distribution channels that must agree
+verify_shellcheck() {
+  read_image
+  local repo=koalaman/shellcheck
+  local tag="${TAG}"
+  local archive="shellcheck-${tag}.linux.x86_64.tar.xz"
+  tag_commit "${repo}" "${tag}" > /dev/null
+  download "${repo}" "${tag}" "${archive}"
+  tar -xJf "${WORK}/${archive}" -C "${WORK}" "shellcheck-${tag}/shellcheck"
+  extract_binary /bin/shellcheck
+  same_file "${WORK}/image-binary" "${WORK}/shellcheck-${tag}/shellcheck"
+  METHOD="no signature published: the binary in the image is the binary of the GitHub release ${tag}"
+  RESULT="⚠️"
+}
+
 # ---------- entry point ----------
 
 case "${TOOL}" in
   trivy) verify_trivy ;;
   syft | grype) verify_anchore "${TOOL}" ;;
   jq) verify_jq ;;
+  hadolint) verify_hadolint ;;
+  shellcheck) verify_shellcheck ;;
 esac
 
 echo "VERIFIED ${TOOL} ${TAG} ${DIGEST}: ${METHOD}"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  echo "| ${TOOL} | ${TAG} | \`${DIGEST}\` | ${METHOD} | ✅ |" >> "${GITHUB_STEP_SUMMARY}"
+  echo "| ${TOOL} | ${TAG} | \`${DIGEST}\` | ${METHOD} | ${RESULT} |" >> "${GITHUB_STEP_SUMMARY}"
 fi

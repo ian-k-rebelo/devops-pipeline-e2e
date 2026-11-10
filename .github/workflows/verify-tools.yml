@@ -1,8 +1,9 @@
-# Tool images: checks that the tool images pinned in .github/<tool>/Dockerfile (Trivy, Syft, Grype
-# and jq) are the official images of their versions, with .github/scripts/verify-tool-image.sh.
+# Tool images: checks that the tool images pinned in .github/<tool>/Dockerfile (Trivy, Syft, Grype,
+# jq, hadolint and ShellCheck) are the official images of their versions, with
+# .github/scripts/verify-tool-image.sh.
 # On pull requests it always runs, because it is a required check, and verifies only the tools
 # whose Dockerfile changed (all of them when the script or this workflow changed); with no tool
-# change it passes without verifying anything. Run by hand, it verifies all four, for audits:
+# change it passes without verifying anything. Run by hand, it verifies all of them, for audits:
 # the job summary lists the result of each tool.
 name: Tool images
 
@@ -38,7 +39,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
         run: |
-          ALL="trivy syft grype jq"
+          ALL="trivy syft grype jq hadolint shellcheck"
           if [[ "${EVENT}" != "pull_request" ]]; then
             TOOLS="${ALL}"
           else
@@ -60,6 +61,13 @@ jobs:
           echo "Tools to verify: ${TOOLS:-none}"
           echo "tools=${TOOLS}" >> "${GITHUB_OUTPUT}"
 
+      # jq reads the hadolint attestation; the same jq as the CI (.github/jq/Dockerfile)
+      - name: Install jq
+        if: steps.tools.outputs.tools != ''
+        run: |
+          .github/scripts/install-jq.sh "${RUNNER_TEMP}/bin"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
       # cosign 3.1.4, the same as the scheduled scan and the local setup. The action checks its
       # bootstrap cosign against a checksum written in the action, and uses it to verify this version.
       # When Dependabot updates the action to v4.1.3, remove cosign-release (its default is 3.1.4)
@@ -72,6 +80,7 @@ jobs:
       - name: Verify the tool images
         env:
           TOOLS: ${{ steps.tools.outputs.tools }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           {
             echo "## Tool images"
