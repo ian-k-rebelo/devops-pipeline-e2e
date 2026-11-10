@@ -100,6 +100,65 @@ updates:
       prefix: ci
       include: scope
 
+  # hadolint image: lints the Dockerfiles (.github/hadolint/Dockerfile).
+  # The required check Verify tool images verifies each update against the signed release
+  - package-ecosystem: docker
+    directory: /.github/hadolint
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Lisbon
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+
+  # ShellCheck image: lints the shell scripts (.github/shellcheck/Dockerfile).
+  # ShellCheck publishes no signatures: Verify tool images compares the image with the release
+  - package-ecosystem: docker
+    directory: /.github/shellcheck
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Lisbon
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+
+  # Go toolchain image that builds the Go tools (.github/golang/Dockerfile)
+  - package-ecosystem: docker
+    directory: /.github/golang
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Lisbon
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+
+  # Go tools (actionlint, kubeconform, kustomize) in .github/tools/go.mod; the Go toolchain checks
+  # every module against .github/tools/go.sum and the public Go checksum database
+  - package-ecosystem: gomod
+    directory: /.github/tools
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Lisbon
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+
   # GitHub Actions used by the workflows in .github/workflows
   - package-ecosystem: github-actions
     directory: /

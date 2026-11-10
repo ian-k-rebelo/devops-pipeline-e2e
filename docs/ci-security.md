@@ -97,7 +97,8 @@ two-factor authentication.
 | Base image | `app/Dockerfile` | Tag and digest |
 | Python libraries | `app/requirements*.txt` | Exact versions |
 | GitHub Actions | `.github/workflows/*.yml` | Full commit SHA (version in a comment) |
-| Trivy, Syft, Grype, jq | `.github/<tool>/Dockerfile` | Tag and digest |
+| Trivy, Syft, Grype, jq, hadolint, ShellCheck, Go toolchain | `.github/<tool>/Dockerfile` | Tag and digest |
+| actionlint, kubeconform, kustomize (Go tools) | `.github/tools/go.mod` | Exact versions, and the hash of every module in `.github/tools/go.sum` |
 
 The tool Dockerfiles are never built: the scripts read the image from their `FROM` line. They
 exist so that Dependabot can propose new versions.
@@ -120,10 +121,20 @@ of the version in its tag:
 | Trivy | Yes | The image signature: made by the Trivy release workflow, at the tag of that version and at the commit of that tag |
 | Syft, Grype | No | The signature of the release checksums (release workflow, commit of the version tag), the sha256 of the release archive, and that the binary in the image is the release binary |
 | jq | Attested | The provenance attestation of the image and of the release binary, and that the binary in the image is the release binary |
+| hadolint | No | The provenance attestation of the release binary (read from the GitHub API; release workflow, commit of the version tag), and that the binary in the image is the release binary |
+| ShellCheck | No | ShellCheck publishes no signatures: only that the binary in the image (Docker Hub) is the binary of the GitHub release. The summary marks it ⚠️ |
 
 Docker pulls by digest and ignores the tag, so without this check a pull request could show a
 harmless tag with the digest of another image, and every other check would still pass. Only the
 `linux/amd64` binary is compared: it is the one the runners execute.
+
+**Go tools** (`.github/tools/go.mod`)
+
+actionlint, kubeconform and kustomize are built from source with the Go toolchain image
+(`.github/golang/Dockerfile`, a Docker Official Image pinned by digest, like the base image of
+the application). The Go toolchain checks every module against `.github/tools/go.sum`, and the
+hashes in `go.sum` are checked against the public Go checksum database, an append-only log: every
+user gets exactly the same code for a version, and published code cannot be replaced.
 
 ## 4. Vulnerability policy
 
@@ -231,7 +242,7 @@ manual scan closed the issue.
 
 **Evidence**
 
-- **Tool images, run by hand** (Actions, *Run workflow*): verifies the four tool images and lists
+- **Tool images, run by hand** (Actions, *Run workflow*): verifies the six tool images and lists
   each one in the job summary, with the commit and the date.
 - **Run logs and summaries** are kept for 90 days (the GitHub default). Reports that must be kept
   longer are attached to the GitHub release of each version.
@@ -240,11 +251,11 @@ manual scan closed the issue.
 **Running the checks locally**
 
 Requirements: Docker, [cosign](https://github.com/sigstore/cosign) (the version set by `cosign-release` in
-the workflows), git, curl. No `sudo`.
+the workflows), git, curl, jq. No `sudo`.
 
 ```bash
 .github/scripts/install-jq.sh ~/.local/bin            # the same jq as the CI
-.github/scripts/verify-tool-image.sh grype            # trivy, syft, grype or jq
+.github/scripts/verify-tool-image.sh grype            # trivy, syft, grype, jq, hadolint or shellcheck
 .github/scripts/check-vex.sh .github/vex/openvex.json sbom.cdx.json
 .github/scripts/scan-trivy.sh remote "ghcr.io/ian-k-rebelo/devops-pipeline-e2e@${DIGEST}"
 .github/scripts/scan-grype.sh sbom.cdx.json
@@ -264,6 +275,8 @@ points `verify-tool-image.sh` at another Dockerfile; both exist only for tests.
   checks, the empty bypass list, the approval of outside pull requests, CODEOWNERS and the pull
   request checklist. The settings for a team are ready (section 2, *Team mode*).
 - **Only `linux/amd64`** binaries of the tools are compared, the platform of the runners.
+- **ShellCheck publishes no signatures:** its image can only be compared with its GitHub release,
+  so a compromise of both channels would not be detected.
 - **Scheduled runs can be late:** GitHub delays them under load (a delay of more than 6 hours has
   been seen). One run a day is still enough.
 - **Evidence retention:** run logs last 90 days, and release attachments can be deleted by an
