@@ -70,6 +70,10 @@ flowchart LR
 - Every pull request starts from `.github/pull_request_template.md`: what changes and why, how it
   was tested, and a checklist (Conventional Commits title, tests, secrets, pinned versions, VEX,
   documentation). `.github/CODEOWNERS` names who reviews each path.
+- The squash commit takes the pull request title and the commit details (repository setting),
+  never the pull request description: the history keeps what changed and why, and the checklist
+  stays in the pull request. A commit body starts with one or two sentences on why, then a list
+  of what changed.
 
 **Team mode** (when a second maintainer joins)
 
@@ -115,6 +119,55 @@ Dependabot (`.github/dependabot.yml`) proposes updates every Monday at 06:00 (Eu
 for releases at least **7 days old** (cooldown), so that a compromised release is likely to be
 found and withdrawn before it reaches this project. Security updates are not delayed by the
 cooldown. Each update is a normal pull request, with every required check.
+
+Dependabot reads the age of an image from its registry, and the GitHub Container Registry gives
+no publication date: for jq and hadolint (`ghcr.io`) the cooldown is not applied, and the update
+is proposed on the day of the release. So the age is also enforced by Tool images, for every
+tool (below).
+
+**Release age**
+
+Tool images reads the publication date of the GitHub release of each tool, and fails if it is
+less than **7 days** old (whole days, UTC). This holds whatever the registry, and does not depend
+on Dependabot. A pull request opened earlier stays red: run the check again when the release is
+old enough.
+
+When a newer release cannot wait (for example, it fixes a vulnerability in the tool itself), add
+an exception to `tools/release-age-exceptions.json`, in its own pull request:
+
+```json
+{
+  "tool": "trivy",
+  "tag": "0.76.3",
+  "reason": "Fixes GHSA-xxxx-xxxx-xxxx in Trivy itself",
+  "expires": "2026-11-20"
+}
+```
+
+- `tag` is the exact tag of the image in `tools/<tool>/Dockerfile`; the exception covers only
+  that tag.
+- `reason` is one line, without `|`; `expires` is at most the day the release is 7 days old.
+- The summary marks the tool ⚠️, with the reason. An expired exception fails the check of that
+  tool until it is removed.
+
+**Reviewing a Dependabot pull request for a tool**
+
+1. **Files changed:** only the `FROM` line of `tools/<tool>/Dockerfile` (tag and digest).
+2. **Tool images:** "Tools to verify" lists only that tool, and its row is ✅ (or ⚠️ for
+   ShellCheck).
+3. **The release:** `https://github.com/<owner>/<repo>/releases/tag/<tag>`. Its date, and the
+   changes that touch what this project uses (search the notes for the features used, such as
+   `sbom`, `vex` or `cyclonedx`). Then the **Security** tab of that repository: an advisory that
+   affects the current version makes the update urgent.
+4. **The pipeline:** CI / Image passes with the new version. For a scanner (Trivy, Grype), compare
+   its results with the last run on `main` (the scan step of the Image job): any new or removed
+   finding must be explained, and the VEX exceptions must still apply.
+5. **Approve** with a comment that says what was checked: origin, age, release notes and
+   advisories, and the result in the pipeline. Then squash and merge.
+
+If the pull request is behind `main`, comment `@dependabot rebase`. If Dependabot does not react
+within a few minutes, use *Update branch* → **Update with rebase** (never *Update with merge
+commit*); Dependabot then stops managing that pull request, so merge it soon.
 
 **Tool images** (`.github/scripts/verify-tool-image.sh`)
 
@@ -249,7 +302,12 @@ manual scan closed the issue.
 **Evidence**
 
 - **Tool images, run by hand** (Actions, *Run workflow*): verifies the six tool images and lists
-  each one in the job summary, with the commit and the date.
+  each one in the job summary, with the release date, the commit and the date.
+- **Dependabot, every Monday** after 06:00: *Insights* → *Dependency graph* → *Dependabot*. A
+  failed update job is not notified anywhere else, and a ⚠️ shows a warning (such as the cooldown
+  not applied to `ghcr.io`).
+- **A new automation is proven by its result,** not by a green job: a new Dependabot entry by a
+  pull request it opens, a new check by a negative test that makes it fail.
 - **Run logs and summaries** are kept for 90 days (the GitHub default). Reports that must be kept
   longer are attached to the GitHub release of each version.
 - **Attestations** (provenance and SBOM) are stored in GitHub and next to the image in `ghcr.io`.
@@ -267,8 +325,10 @@ the workflows), git, curl, jq. No `sudo`.
 .github/scripts/scan-grype.sh sbom.cdx.json
 ```
 
-`VEX_TODAY=YYYY-MM-DD` tests the expiry of the exceptions on another date, and `TOOL_DOCKERFILE`
-points `verify-tool-image.sh` at another Dockerfile; both exist only for tests.
+`VEX_TODAY=YYYY-MM-DD` tests the expiry of the VEX exceptions on another date. For
+`verify-tool-image.sh`, `TOOL_DOCKERFILE` points at another Dockerfile, `TOOL_EXCEPTIONS` at
+another exceptions file, and `TOOL_TODAY=YYYY-MM-DD` tests the release age on another date. They
+exist only for tests.
 
 ## 8. Known limitations
 
@@ -283,6 +343,11 @@ points `verify-tool-image.sh` at another Dockerfile; both exist only for tests.
 - **Only `linux/amd64`** binaries of the tools are compared, the platform of the runners.
 - **ShellCheck publishes no signatures:** its image can only be compared with its GitHub release,
   so a compromise of both channels would not be detected.
+- **Dependabot cannot apply the cooldown to `ghcr.io`** (jq, hadolint): it proposes those updates
+  on the day of the release, and the release age check of Tool images blocks them until they are
+  7 days old.
+- **Dependabot commands can be ignored:** `@dependabot rebase` was ignored twice on one pull
+  request; *Update with rebase* is the fallback (section 3).
 - **Scheduled runs can be late:** GitHub delays them under load (a delay of more than 6 hours has
   been seen). One run a day is still enough.
 - **Evidence retention:** run logs last 90 days, and release attachments can be deleted by an
