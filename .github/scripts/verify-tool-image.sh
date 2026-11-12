@@ -7,12 +7,16 @@
 #     binary in the image (linux/amd64, the platform of the CI) is byte for byte the binary of that
 #     release.
 # ShellCheck publishes no signatures: its binary is only compared with the binary of the release.
+# Every tool: the GitHub release of that version must be at least 7 days old (a compromised
+# release is usually found and withdrawn within days), unless tools/release-age-exceptions.json
+# has a valid exception for that tag.
 # Used by .github/workflows/verify-tools.yml on pull requests that change a tool image, and by hand
 # to audit all of them.
 # Usage: verify-tool-image.sh trivy|syft|grype|jq|hadolint|shellcheck
 # Needs: docker, cosign, git, curl, jq, sha256sum. Adds a row to $GITHUB_STEP_SUMMARY when it is set.
 # GITHUB_TOKEN, when set, authenticates the requests to the GitHub API (higher rate limit).
-# TOOL_DOCKERFILE replaces the path of the Dockerfile, only to test this script.
+# TOOL_DOCKERFILE, TOOL_EXCEPTIONS and TOOL_TODAY (YYYY-MM-DD) replace the Dockerfile, the exceptions
+# file and today's date, only to test this script.
 set -euo pipefail
 
 USAGE="usage: verify-tool-image.sh trivy|syft|grype|jq|hadolint|shellcheck"
@@ -25,14 +29,22 @@ esac
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOCKERFILE="${TOOL_DOCKERFILE:-${REPO_ROOT}/tools/${TOOL}/Dockerfile}"
 ISSUER=https://token.actions.githubusercontent.com
+MIN_RELEASE_AGE_DAYS=7
+EXCEPTIONS="${TOOL_EXCEPTIONS:-${REPO_ROOT}/tools/release-age-exceptions.json}"
+TODAY="${TOOL_TODAY:-$(date -u +%F)}"
+if [[ ! "${TODAY}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  echo "TOOL_TODAY must be YYYY-MM-DD, found: '${TODAY}'" >&2
+  exit 1
+fi
 RESULT="✅"
+AGE_NOTE=""
 WORK="$(mktemp -d)"
 # On exit: delete the work folder and, if the check failed, add a failed row to the summary
 finish() {
   local code=$?
   rm -rf "${WORK}"
   if [[ "${code}" -ne 0 && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-    echo "| ${TOOL} | ${TAG:-?} | \`${DIGEST:-?}\` | verification failed, see the job log | ❌ |" >> "${GITHUB_STEP_SUMMARY}"
+    echo "| ${TOOL} | ${TAG:-?} | ${RELEASED:-?} | \`${DIGEST:-?}\` | verification failed, see the job log | ❌ |" >> "${GITHUB_STEP_SUMMARY}"
   fi
 }
 trap finish EXIT
@@ -76,6 +88,77 @@ download() {
   curl -fsSL --retry 3 -o "${WORK}/$3" "https://github.com/$1/releases/download/$2/$3"
 }
 
+# Prints the answer of the GitHub API to a GET request for a path ($1); authenticated when
+# GITHUB_TOKEN is set (higher rate limit)
+github_api() {
+  local auth=()
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  fi
+  curl -fsSL --retry 3 "${auth[@]}" -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/$1"
+}
+
+# Fails unless the GitHub release with tag $2 of repository $1 was published at least
+# MIN_RELEASE_AGE_DAYS days ago (whole days, UTC), or tools/release-age-exceptions.json has a valid
+# exception for this tool and TAG. Sets RELEASED (the publication date) for the summary
+check_release_age() {
+  local published days latest expired matches expires reason
+  published="$(github_api "repos/$1/releases/tags/$2" | jq -r '.published_at // empty')"
+  if [[ ! "${published}" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})T ]]; then
+    echo "Release $2 of $1 has no publication date" >&2
+    return 1
+  fi
+  RELEASED="${BASH_REMATCH[1]}"
+  days=$(( ($(date -u -d "${TODAY}" +%s) - $(date -u -d "${RELEASED}" +%s)) / 86400 ))
+  echo "Release $2 of $1 published on ${RELEASED}: ${days} days before ${TODAY}"
+
+  # The exceptions: an object with an "exceptions" list; each one names a tool, its exact image
+  # tag, the reason (one line, no "|") and the last day it is valid
+  if ! jq -e '(.exceptions | type == "array") and all(.exceptions[];
+      (.tool | type == "string") and (.tag | type == "string")
+      and (.reason | type == "string" and length > 0 and (test("[|\n]") | not))
+      and (.expires | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")))' \
+      "${EXCEPTIONS}" > /dev/null; then
+    echo "Malformed exceptions file: ${EXCEPTIONS}" >&2
+    return 1
+  fi
+  # An expired exception must be removed, even when this tag does not need it any more
+  expired="$(jq -r --arg tool "${TOOL}" --arg today "${TODAY}" \
+    '.exceptions[] | select(.tool == $tool and .expires < $today) | "\(.tag) (expired on \(.expires))"' \
+    "${EXCEPTIONS}")"
+  if [[ -n "${expired}" ]]; then
+    echo "Remove the expired release age exceptions for ${TOOL}: ${expired}" >&2
+    return 1
+  fi
+  matches="$(jq -r --arg tool "${TOOL}" --arg tag "${TAG}" \
+    '[.exceptions[] | select(.tool == $tool and .tag == $tag)] | length' "${EXCEPTIONS}")"
+  if [[ "${matches}" -gt 1 ]]; then
+    echo "More than one release age exception for ${TOOL} ${TAG}" >&2
+    return 1
+  fi
+  if [[ "${days}" -ge "${MIN_RELEASE_AGE_DAYS}" ]]; then
+    return 0
+  fi
+  if [[ "${matches}" -eq 0 ]]; then
+    echo "The release is ${days} days old, and the minimum is ${MIN_RELEASE_AGE_DAYS}: wait, or add an exception to tools/release-age-exceptions.json (docs/ci-security.md, section 3)" >&2
+    return 1
+  fi
+  expires="$(jq -r --arg tool "${TOOL}" --arg tag "${TAG}" \
+    '.exceptions[] | select(.tool == $tool and .tag == $tag) | .expires' "${EXCEPTIONS}")"
+  reason="$(jq -r --arg tool "${TOOL}" --arg tag "${TAG}" \
+    '.exceptions[] | select(.tool == $tool and .tag == $tag) | .reason' "${EXCEPTIONS}")"
+  # An exception only covers the days before the release is old enough
+  latest="$(date -u -d "${RELEASED} + ${MIN_RELEASE_AGE_DAYS} days" +%F)"
+  if [[ "${expires}" > "${latest}" ]]; then
+    echo "The exception for ${TOOL} ${TAG} expires on ${expires}, after ${latest}, the day the release is ${MIN_RELEASE_AGE_DAYS} days old" >&2
+    return 1
+  fi
+  echo "Release age exception for ${TOOL} ${TAG}, until ${expires}: ${reason}"
+  AGE_NOTE="; release only ${days} days old, accepted by an exception until ${expires}: ${reason}"
+  RESULT="⚠️"
+}
+
 # Copies a file ($1) out of the image (linux/amd64) into the work folder, as image-binary;
 # the container is created but never started
 extract_binary() {
@@ -108,6 +191,7 @@ verify_trivy() {
   local ref="refs/tags/v${version}"
   local sha
   sha="$(tag_commit "${repo}" "v${version}")"
+  check_release_age "${repo}" "v${version}"
   cosign verify "${IMAGE}@${DIGEST}" \
     --certificate-identity-regexp "^https://github\.com/${repo//./\\.}/\.github/workflows/.+@${ref//./\\.}$" \
     --certificate-oidc-issuer "${ISSUER}" \
@@ -130,6 +214,7 @@ verify_anchore() {
   local archive="${tool}_${version}_linux_amd64.tar.gz"
   local sha
   sha="$(tag_commit "${repo}" "${tag}")"
+  check_release_age "${repo}" "${tag}"
   download "${repo}" "${tag}" "${checksums}"
   download "${repo}" "${tag}" "${checksums}.sigstore.json"
   download "${repo}" "${tag}" "${archive}"
@@ -155,6 +240,7 @@ verify_jq() {
   local identity="https://github.com/${repo}/.github/workflows/ci.yml@refs/tags/${tag}"
   local sha
   sha="$(tag_commit "${repo}" "${tag}")"
+  check_release_age "${repo}" "${tag}"
   cosign verify-attestation "${IMAGE}@${DIGEST}" \
     --type https://slsa.dev/provenance/v1 \
     --certificate-identity "${identity}" \
@@ -182,15 +268,11 @@ verify_hadolint() {
   local tag="${TAG}"
   local binary=hadolint-linux-x86_64
   local sha digest
-  local auth=()
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-  fi
   sha="$(tag_commit "${repo}" "${tag}")"
+  check_release_age "${repo}" "${tag}"
   download "${repo}" "${tag}" "${binary}"
   digest="$(sha256sum "${WORK}/${binary}" | cut -d ' ' -f 1)"
-  curl -fsSL --retry 3 "${auth[@]}" -o "${WORK}/attestations.json" \
-    "https://api.github.com/repos/${repo}/attestations/sha256:${digest}"
+  github_api "repos/${repo}/attestations/sha256:${digest}" > "${WORK}/attestations.json"
   jq -e '.attestations[0].bundle' "${WORK}/attestations.json" > "${WORK}/bundle.json"
   cosign verify-blob-attestation "${WORK}/${binary}" \
     --bundle "${WORK}/bundle.json" \
@@ -211,6 +293,7 @@ verify_shellcheck() {
   local tag="${TAG}"
   local archive="shellcheck-${tag}.linux.x86_64.tar.xz"
   tag_commit "${repo}" "${tag}" > /dev/null
+  check_release_age "${repo}" "${tag}"
   download "${repo}" "${tag}" "${archive}"
   tar -xJf "${WORK}/${archive}" -C "${WORK}" "shellcheck-${tag}/shellcheck"
   extract_binary /bin/shellcheck
@@ -229,7 +312,8 @@ case "${TOOL}" in
   shellcheck) verify_shellcheck ;;
 esac
 
-echo "VERIFIED ${TOOL} ${TAG} ${DIGEST}: ${METHOD}"
+METHOD="${METHOD}${AGE_NOTE}"
+echo "VERIFIED ${TOOL} ${TAG} (released ${RELEASED}) ${DIGEST}: ${METHOD}"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  echo "| ${TOOL} | ${TAG} | \`${DIGEST}\` | ${METHOD} | ${RESULT} |" >> "${GITHUB_STEP_SUMMARY}"
+  echo "| ${TOOL} | ${TAG} | ${RELEASED} | \`${DIGEST}\` | ${METHOD} | ${RESULT} |" >> "${GITHUB_STEP_SUMMARY}"
 fi

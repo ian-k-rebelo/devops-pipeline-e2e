@@ -46,7 +46,7 @@ jobs:
             CHANGED="$(git diff --name-only HEAD^1 HEAD)"
             echo "Files changed by the pull request:"
             echo "${CHANGED}"
-            if grep -qxE '\.github/(scripts/verify-tool-image\.sh|workflows/verify-tools\.yml)' <<< "${CHANGED}"; then
+            if grep -qxE '\.github/(scripts/verify-tool-image\.sh|workflows/verify-tools\.yml)|tools/release-age-exceptions\.json' <<< "${CHANGED}"; then
               TOOLS="${ALL}"
             else
               TOOLS=""
@@ -93,8 +93,8 @@ jobs:
             exit 0
           fi
           {
-            echo "| Tool | Tag | Digest | Verification | Result |"
-            echo "|---|---|---|---|---|"
+            echo "| Tool | Tag | Released | Digest | Verification | Result |"
+            echo "|---|---|---|---|---|---|"
           } >> "${GITHUB_STEP_SUMMARY}"
           FAILED=""
           for t in ${TOOLS}; do

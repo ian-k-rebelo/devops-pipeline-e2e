@@ -1,0 +1,4 @@
+{
+  "description": "Temporary exceptions to the 7-day release age rule of Tool images: see docs/ci-security.md, section 3",
+  "exceptions": []
+}
