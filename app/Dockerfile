@@ -10,12 +10,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Working directory inside the image
 WORKDIR /app
 
+# Unprivileged user to run the application, instead of root
+RUN useradd --create-home --uid 10001 appuser
+
 # Install dependencies first, so this layer is cached while only the code changes
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Unprivileged user to run the application, instead of root
-RUN useradd --create-home --uid 10001 appuser
 
 # Application code: changes often, so it is copied last
 COPY app.py .

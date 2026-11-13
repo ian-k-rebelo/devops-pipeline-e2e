@@ -162,7 +162,7 @@ jobs:
       - name: Smoke test
         run: |
           docker run -d --name smoke -p 8000:8000 devops-pipeline-e2e:ci
-          for i in $(seq 1 10); do
+          for _ in $(seq 1 10); do
             if curl -fsS http://localhost:8000/health; then
               exit 0
             fi
