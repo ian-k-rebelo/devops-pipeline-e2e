@@ -1,0 +1,32 @@
+# Lint: checks the pipeline and infrastructure code (workflows, shell scripts and Dockerfiles)
+# with .github/scripts/lint.sh, the same script and the same pinned tools as the local setup.
+# Each tool runs in a container with no network and the repository mounted read-only.
+# It is a required check, so it runs on every pull request, whatever the files it changes.
+name: Lint
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+# No permissions by default: the job asks only for what it needs
+permissions: {}
+
+# A new push to the same pull request cancels the run that is still going
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Lint
+        run: .github/scripts/lint.sh

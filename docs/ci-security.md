@@ -11,6 +11,7 @@ flowchart LR
   subgraph pr["Pull request (required checks)"]
     tests["Tests"] --> image["Image<br/>build once, SBOM, VEX check,<br/>smoke test, Trivy, Grype"]
     tools["Verify tool images"]
+    lint["Lint<br/>actionlint, ShellCheck, hadolint<br/>no network, read-only"]
   end
   pr -->|squash and merge| main["main"]
   main --> publish["CI on main: Tests, Image,<br/>then Publish: push by digest,<br/>sign provenance and SBOM"]
@@ -34,6 +35,7 @@ flowchart LR
 | CI | `.github/workflows/ci.yml` | Every pull request; push to `main`; version tags `v*` | Tests, Image, Publish (push only) |
 | Scheduled scan | `.github/workflows/scheduled-scan.yml` | Every day at 07:41 UTC; by hand; pull requests that change the scan or what it uses | Scan, Notify (never on pull requests) |
 | Tool images | `.github/workflows/verify-tools.yml` | Every pull request; by hand | Verify tool images |
+| Lint | `.github/workflows/lint.yml` | Every pull request; by hand | Lint |
 
 **CI jobs**
 
@@ -46,6 +48,21 @@ flowchart LR
   --preserve-digests`, checks that every tag points to the tested digest, and signs the build
   provenance and the SBOM with `actions/attest` (keyless, Sigstore). Tags: `sha-<commit>` and
   `main` on `main`, `X.Y.Z` and `X.Y` on version tags, never `latest`.
+
+**Lint** (`.github/scripts/lint.sh`)
+
+- **actionlint** checks the workflows, and the shell of their `run` steps with ShellCheck;
+  **ShellCheck** checks the shell scripts; **hadolint** checks the Dockerfiles. Only the files
+  tracked by git are linted.
+- **Prepare** (with network): actionlint is built from `tools/go/go.mod` in the Go toolchain
+  image, and the ShellCheck and hadolint binaries are copied out of their pinned images, the
+  images that Tool images verifies.
+- **Lint** (sandbox): each tool runs in a container with no network, a read-only file system and
+  no Linux capabilities, as the user that runs the script (not root), with the repository mounted
+  read-only. A compromised tool can neither send anything out nor change the code.
+- The same script runs locally (section 7), so a failure in the CI can be reproduced exactly.
+- A finding is fixed, or ignored on that line only, with a comment that says why
+  (`# hadolint ignore=DLxxxx`, `# shellcheck disable=SCxxxx`); never for the whole project.
 
 **Permissions and secrets**
 
@@ -62,8 +79,8 @@ flowchart LR
 
 - Changes reach `main` only through pull requests, merged with squash (linear history); force
   pushes and deleting `main` are blocked.
-- Required checks: **Tests**, **Image** and **Verify tool images**; the branch must be up to date
-  with `main` before merging.
+- Required checks: **Tests**, **Image**, **Verify tool images** and **Lint**; the branch must be
+  up to date with `main` before merging.
 - Every check runs on every pull request. A workflow skipped by a `paths` filter would leave its
   required check waiting forever, so the Tool images workflow always runs and decides inside
   (with no tool change it passes without verifying anything).
@@ -149,6 +166,10 @@ an exception to `tools/release-age-exceptions.json`, in its own pull request:
 - `reason` is one line, without `|`; `expires` is at most the day the release is 7 days old.
 - The summary marks the tool ⚠️, with the reason. An expired exception fails the check of that
   tool until it is removed.
+
+After the exception is merged, update the pull request of the tool with `main` (`@dependabot
+rebase`, or *Update with rebase*). Running the check again is not enough: a re-run tests the
+same merge commit as before, which does not have the exception.
 
 **Reviewing a Dependabot pull request for a tool**
 
@@ -320,6 +341,7 @@ the workflows), git, curl, jq. No `sudo`.
 ```bash
 .github/scripts/install-jq.sh ~/.local/bin            # the same jq as the CI
 .github/scripts/verify-tool-image.sh grype            # trivy, syft, grype, jq, hadolint or shellcheck
+.github/scripts/lint.sh                               # the same lint as the CI
 .github/scripts/check-vex.sh .github/vex/openvex.json sbom.cdx.json
 .github/scripts/scan-trivy.sh remote "ghcr.io/ian-k-rebelo/devops-pipeline-e2e@${DIGEST}"
 .github/scripts/scan-grype.sh sbom.cdx.json
@@ -330,12 +352,21 @@ the workflows), git, curl, jq. No `sudo`.
 another exceptions file, and `TOOL_TODAY=YYYY-MM-DD` tests the release age on another date. They
 exist only for tests.
 
+`lint.sh` keeps the Go module and build cache in `~/.cache/devops-pipeline-e2e/lint` between runs
+(`LINT_CACHE` replaces the folder). Go makes its module cache read-only: to delete it, run
+`chmod -R u+w` on the folder first.
+
 ## 8. Known limitations
 
-- **Tools used before they are verified:** in a pull request that changes a tool image, the CI
-  and the scheduled scan run that tool while Tool images verifies it. A bad image cannot be
+- **Tools used before they are verified:** in a pull request that changes a tool image, the CI,
+  the scheduled scan and Lint run that tool while Tool images verifies it. A bad image cannot be
   merged, publish or reach secrets (the jobs only read, and there are none), but it runs on the
-  temporary runner and can lie about that pull request's scan. Planned: verify the tool first.
+  temporary runner and can lie about that pull request's results; in Lint it has no network and
+  cannot change the code. Planned: verify the tool first.
+- **The Go toolchain image is not verified yet:** it is pinned by digest and is a Docker Official
+  Image, like the base image of the application, but it is not compared with the Go release yet.
+  It builds the Go tools, with network. Planned: compare the Go in the image with the checksums
+  published by the Go team on go.dev.
 - **No second reviewer:** the project has one maintainer, and GitHub does not let authors approve
   their own pull requests, so no approval is required. Compensating controls: the required
   checks, the empty bypass list, the approval of outside pull requests, CODEOWNERS and the pull
