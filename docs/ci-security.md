@@ -247,14 +247,20 @@ OpenVEX has no expiry date, so `.github/scripts/check-vex.sh` enforces the rules
 
 **Working with exceptions**
 
-- **Add:** only after checking the vulnerability in the distribution's tracker (the scanner's
-  title can be wrong) and showing that the vulnerable code is not reachable. Add a statement with
-  today's `timestamp`, raise the document `version` and set its `last_updated`, and test locally
+- **Add:** only after checking the vulnerability in the distribution's tracker and showing that
+  the vulnerable code is not reachable. The tracker must list the CVE **for that package**, and so
+  must the advisory that fixes it (for Debian, the DSA): a scanner can show the wrong title, and
+  its database can even link a CVE to the wrong package. Add a statement with today's
+  `timestamp`, raise the document `version` and set its `last_updated`, and test locally
   (section 7) before opening the pull request.
-- **Renew:** review the analysis again; if it still holds, set the statement's `last_updated` to
-  the review date, in a pull request that says what was reviewed.
+- **Renew:** review the analysis again, and check that both scanners still show the CVE as
+  suppressed by VEX; if it still holds, set the statement's `last_updated` to the review date, in
+  a pull request that says what was reviewed.
 - **Remove:** when the fixed package reaches the image (the VEX check warns), remove the statement
-  in the same pull request that updates the image.
+  in the same pull request that updates the image. In a Dependabot pull request, add that commit
+  after *Update with rebase* (Dependabot no longer manages the pull request by then), or remove
+  the statement in a pull request right after the merge. Remove it too when the CVE turns out not
+  to affect that package (a wrong match in a scanner database).
 
 An exception is temporary: the preferred fix is always a new image with the fixed package.
 
@@ -316,7 +322,10 @@ link to the run. GitHub also emails whoever last changed the schedule about the 
 file functions (issue #18). Debian had fixed them, but the official Python image had not been
 rebuilt yet, and the app only reaches zlib through the Python `zlib` module, which never calls
 those functions. They were accepted with a temporary VEX exception (pull request #19), and the
-manual scan closed the issue.
+manual scan closed the issue. One of them, CVE-2026-76844, turned out to be a wrong match in the
+Trivy database: the Debian tracker lists it for `webpack-dev-middleware` (NOT-FOR-US), and the
+zlib fix, DSA-6613-1, is for CVE-2026-27171 and CVE-2026-85091. When both scanners stopped showing
+it, its statement was removed.
 
 ## 7. Audit and local checks
 
@@ -372,6 +381,9 @@ exist only for tests.
   checks, the empty bypass list, the approval of outside pull requests, CODEOWNERS and the pull
   request checklist. The settings for a team are ready (section 2, *Team mode*).
 - **Only `linux/amd64`** binaries of the tools are compared, the platform of the runners.
+- **A VEX statement that no scanner uses is not detected:** the VEX check reads the SBOM, so it
+  warns when a package leaves the image, not when the scanners stop showing the CVE (for example
+  after a database fix). The renewal review checks the scanners' output (section 4).
 - **ShellCheck publishes no signatures:** its image can only be compared with its GitHub release,
   so a compromise of both channels would not be detected.
 - **Dependabot cannot apply the cooldown to `ghcr.io`** (jq, hadolint): it proposes those updates
