@@ -59,12 +59,10 @@ jobs:
           .github/scripts/install-jq.sh "${RUNNER_TEMP}/bin"
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
 
-      # cosign 3.1.4, the same as the local setup. The action checks its bootstrap cosign against a
-      # checksum written in the action, and uses it to verify the signatures of this version.
-      # When Dependabot updates the action to v4.1.3, remove cosign-release (its default is 3.1.4)
+      # cosign 3.1.4, the default of this version of the action and the same as the local setup.
+      # The action checks its bootstrap cosign against a checksum written in the action, and uses
+      # it to verify the signatures of the cosign it installs
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
-        with:
-          cosign-release: v3.1.4
 
       # The digest that the main tag points to now. Every step below uses this digest, so the image
       # whose signatures are verified is the image that is scanned, even if main moves meanwhile

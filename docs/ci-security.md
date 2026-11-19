@@ -186,9 +186,28 @@ same merge commit as before, which does not have the exception.
 5. **Approve** with a comment that says what was checked: origin, age, release notes and
    advisories, and the result in the pipeline. Then squash and merge.
 
-If the pull request is behind `main`, comment `@dependabot rebase`. If Dependabot does not react
-within a few minutes, use *Update branch* → **Update with rebase** (never *Update with merge
-commit*); Dependabot then stops managing that pull request, so merge it soon.
+**Reviewing a Dependabot pull request for an action**
+
+1. **Files changed:** only the `uses:` lines of that action, with a new commit SHA and its version
+   in the comment.
+2. **Origin:** the SHA is the commit of the version tag in the official repository (the commit
+   next to the tag on the release page, or `git ls-remote https://github.com/<owner>/<repo>.git
+   refs/tags/<tag>`). Any other SHA runs other code.
+3. **The release:** its date (at least 7 days, the Dependabot cooldown), what changed for the
+   inputs this project uses, and the **Security** tab. For `sigstore/cosign-installer`, the
+   `cosign-release` default in its `action.yml`: it is the cosign version the workflows install.
+4. **The pipeline:** every workflow that uses the action passes. An action that only runs on
+   `main` (such as `docker/login-action`, used by Publish) is proven by the CI on `main` after
+   the merge.
+5. **Approve** with a comment that says what was checked, then squash and merge.
+
+**A pull request behind `main`**
+
+Use *Update branch* → **Update with rebase** (never *Update with merge commit*), then review and
+merge it soon: Dependabot stops managing a pull request that someone else updated, so it would not
+rebase it again or close it when a newer version comes. GitHub removed several Dependabot comment
+commands in January 2026, and in this repository `@dependabot rebase` was never processed (pull
+requests #25 and #33: no Dependabot job ran), so the comment commands are not used.
 
 **Tool images** (`.github/scripts/verify-tool-image.sh`)
 
@@ -344,8 +363,8 @@ it, its statement was removed.
 
 **Running the checks locally**
 
-Requirements: Docker, [cosign](https://github.com/sigstore/cosign) (the version set by `cosign-release` in
-the workflows), git, curl, jq. No `sudo`.
+Requirements: Docker, [cosign](https://github.com/sigstore/cosign) 3.1.4 (the version the workflows
+install, the default of the pinned `sigstore/cosign-installer`), git, curl, jq. No `sudo`.
 
 ```bash
 .github/scripts/install-jq.sh ~/.local/bin            # the same jq as the CI
@@ -389,8 +408,9 @@ exist only for tests.
 - **Dependabot cannot apply the cooldown to `ghcr.io`** (jq, hadolint): it proposes those updates
   on the day of the release, and the release age check of Tool images blocks them until they are
   7 days old.
-- **Dependabot commands can be ignored:** `@dependabot rebase` was ignored twice on one pull
-  request; *Update with rebase* is the fallback (section 3).
+- **Dependabot comment commands are not used:** GitHub removed several of them in January 2026,
+  and `@dependabot rebase` was never processed in this repository; *Update with rebase* is used
+  instead (section 3).
 - **Scheduled runs can be late:** GitHub delays them under load (a delay of more than 6 hours has
   been seen). One run a day is still enough.
 - **Evidence retention:** run logs last 90 days, and release attachments can be deleted by an
