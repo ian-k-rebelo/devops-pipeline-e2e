@@ -1,5 +1,6 @@
-# Lint: checks the pipeline and infrastructure code (workflows, shell scripts and Dockerfiles)
-# with .github/scripts/lint.sh, the same script and the same pinned tools as the local setup.
+# Lint: checks the pipeline and infrastructure code (workflows, shell scripts, Dockerfiles and
+# Kubernetes manifests) with .github/scripts/lint.sh, the same script and the same pinned tools as
+# the local setup.
 # Each tool runs in a container with no network and the repository mounted read-only.
 # It is a required check, so it runs on every pull request, whatever the files it changes.
 name: Lint
