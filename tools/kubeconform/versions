@@ -1,0 +1,23 @@
+# Sources of the JSON schemas in tools/kubeconform/schemas, which kubeconform uses in the Lint to
+# validate the Kubernetes manifests. To change a version: change it here (with its commit, digest
+# or checksum), run .github/scripts/update-k8s-schemas.sh, review the diff and commit both.
+# The versions must match kind/cluster.yaml and scripts/install-platform.sh: the scripts check it.
+# One KEY=value per line; the scripts read the values with sed, the file is never run.
+
+# Kubernetes (kind/cluster.yaml): the schemas of yannh/kubernetes-json-schema, pinned by commit
+KUBERNETES_VERSION=v1.37.0
+KUBERNETES_SCHEMAS_COMMIT=9e1cd3c3b22e6432cbc5615a5a930f8268f14bf1
+
+# Envoy Gateway (scripts/install-platform.sh): the Gateway API CRDs of its gateway-crds-helm chart,
+# pinned by digest
+ENVOY_GATEWAY_VERSION=v1.9.2
+ENVOY_GATEWAY_CRDS_CHART_DIGEST=sha256:940b88fe361cb22fb651e3075f649e9be885f35b1c8a990658c1a2acc2d2a678
+
+# cert-manager (scripts/install-platform.sh): the CRDs of its release, pinned by checksum
+CERT_MANAGER_VERSION=v1.21.2
+CERT_MANAGER_CRDS_SHA256=262fef78478492cd35b73a1b227106b7802f9c056361d1f561d04b32d751337f
+
+# The kinds used by the manifests in k8s/ and platform/: the core schemas (file names in
+# yannh/kubernetes-json-schema) and the kinds converted from the CRDs
+CORE_SCHEMAS=namespace-v1 deployment-apps-v1 service-v1
+CRD_KINDS=GatewayClass Gateway HTTPRoute Certificate ClusterIssuer

@@ -159,6 +159,21 @@ updates:
       prefix: ci
       include: scope
 
+  # helm in tools/helm/go.mod, which renders the CRDs for update-k8s-schemas.sh: a module of its
+  # own, so that its many dependencies never change the versions used by the tools of tools/go
+  - package-ecosystem: gomod
+    directory: /tools/helm
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Lisbon
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+
   # Python image that runs the CRD converter of update-k8s-schemas.sh (tools/python/Dockerfile).
   # Stay on Python 3.14: PyYAML must publish wheels for a new minor version first
   - package-ecosystem: docker
