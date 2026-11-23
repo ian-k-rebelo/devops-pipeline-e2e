@@ -3,8 +3,8 @@
   "@id": "https://github.com/ian-k-rebelo/devops-pipeline-e2e/blob/main/.github/vex/openvex.json",
   "author": "Ian Rebelo",
   "timestamp": "2026-11-05T12:00:00Z",
-  "last_updated": "2026-11-18T12:00:00Z",
-  "version": 3,
+  "last_updated": "2026-11-23T09:00:00Z",
+  "version": 4,
   "statements": [
     {
       "vulnerability": { "name": "CVE-2026-85091" },
@@ -16,6 +16,28 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "The flaw is in the gz* file functions of zlib (gz_vacate, used by gzwrite and gzprintf). zlib1g comes with the base image, and the app only reaches zlib through the Python zlib module, which uses the deflate/inflate stream functions and never calls the gz* functions. Temporary: remove when the official python base image ships zlib1g 1:1.3.dfsg+really1.3.1-1+deb13u1 (DSA-6613-1)."
+    },
+    {
+      "vulnerability": { "name": "CVE-2026-19499" },
+      "timestamp": "2026-11-23T09:00:00Z",
+      "products": [
+        { "@id": "pkg:deb/debian/libc6@2.41-12%2Bdeb13u4" },
+        { "@id": "pkg:deb/debian/libc-bin@2.41-12%2Bdeb13u4" }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flaw is in the strfmon and strfmon_l functions of glibc (monetary formatting), which can write past the end of the output buffer. glibc comes with the base image, and no program or library in the image imports strfmon or strfmon_l (readelf on every ELF file of the published image): the Python locale module uses setlocale, localeconv and nl_langinfo, and the app does not use ctypes. Temporary: remove when the official python base image ships glibc 2.41-12+deb13u5 (Debian 13.8)."
+    },
+    {
+      "vulnerability": { "name": "CVE-2026-5435" },
+      "timestamp": "2026-11-23T09:00:00Z",
+      "products": [
+        { "@id": "pkg:deb/debian/libc6@2.41-12%2Bdeb13u4" },
+        { "@id": "pkg:deb/debian/libc-bin@2.41-12%2Bdeb13u4" }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flaw is in the deprecated ns_printrr, ns_printrrf and fp_nquery functions of libresolv (glibc), which print DNS TSIG records without enforcing the buffer length. No program or library in the image imports them (readelf on every ELF file of the published image), and the only library linked to libresolv, libnss_hesiod, is never loaded: /etc/nsswitch.conf resolves hosts with files and dns. Temporary: remove when the official python base image ships glibc 2.41-12+deb13u5 (Debian 13.8)."
     }
   ]
 }

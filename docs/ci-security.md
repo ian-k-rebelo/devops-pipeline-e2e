@@ -268,10 +268,12 @@ OpenVEX has no expiry date, so `.github/scripts/check-vex.sh` enforces the rules
 
 - **Add:** only after checking the vulnerability in the distribution's tracker and showing that
   the vulnerable code is not reachable. The tracker must list the CVE **for that package**, and so
-  must the advisory that fixes it (for Debian, the DSA): a scanner can show the wrong title, and
-  its database can even link a CVE to the wrong package. Add a statement with today's
-  `timestamp`, raise the document `version` and set its `last_updated`, and test locally
-  (section 7) before opening the pull request.
+  must the fix: for Debian, the DSA, or the changelog of the package when the fix comes in a point
+  release. A scanner can show the wrong title, and its database can even link a CVE to the wrong
+  package. For a function of a shared library, `readelf --dyn-syms` on every ELF file of the
+  image shows that none imports it. Add a statement with today's `timestamp`, raise the document
+  `version` and set its `last_updated`, and test locally (section 7) before opening the pull
+  request.
 - **Renew:** review the analysis again, and check that both scanners still show the CVE as
   suppressed by VEX; if it still holds, set the statement's `last_updated` to the review date, in
   a pull request that says what was reviewed.
