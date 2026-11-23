@@ -14,12 +14,13 @@ the Flask application behind an Envoy Gateway, over HTTPS only, with a certifica
 |---|---|
 | Docker | 29.9.0 |
 | kind | v0.33.0 |
-| kubectl | v1.37.1 (includes Kustomize v5.8.1) |
+| kubectl | v1.37.1 |
 | Kubernetes (kind node image) | v1.37.0 |
 | Helm | v4.3.1 |
 | [cloud-provider-kind](https://github.com/kubernetes-sigs/cloud-provider-kind) | v0.12.0 |
 
 No `sudo` is needed: your user only needs to be able to run Docker.
+kustomize does not need to be installed: `deploy-local.sh` builds the pinned version of `tools/go/go.mod`, the one the Lint validates the manifests with, in a container.
 
 ### Get the code
 
@@ -59,7 +60,7 @@ Safe to run more than once. Refuses to run against any context other than `kind-
 ./scripts/deploy-local.sh
 ```
 
-Builds the application image, loads it into the kind nodes, applies the platform resources (`platform/`: Gateway, internal CA, gateway certificate) and the application (`k8s/overlays/local`), and waits until everything is ready.
+Builds the application image, loads it into the kind nodes, applies the platform resources (`platform/`: Gateway, internal CA, gateway certificate) and the application (`k8s/overlays/local`), rendered with the pinned kustomize, and waits until everything is ready.
 
 ### Test it
 
@@ -76,9 +77,8 @@ curl --resolve "$HOST:443:$IP" --cacert /tmp/internal-root-ca.crt "https://$HOST
 
 ### Notes and troubleshooting
 
-- **Code changes do not show up:** the image tag is always `local`, so the Pods are not replaced when you rebuild. After `./scripts/deploy-local.sh`, run
-  `kubectl rollout restart deployment/devops-pipeline-e2e -n devops-pipeline-e2e`.
-  (Unique image tags will replace this in the CI/CD stage.)
+- **Each build has its own image tag:** `local-<commit>-<image ID>`, with `-dirty` when `app/` has changes that are not committed. A code change gets a new tag, so the Pods are replaced; older images are removed from the kind nodes.
+- **`gateway … configured` and `httproute … configured` on every deploy:** this changes nothing. `kubectl apply` sends again the lists to which the API server adds default values; the objects stay the same (`metadata.generation` does not change, and `kubectl diff -k platform` shows no difference).
 - **The Gateway has no IP / `curl: (7)`:** `cloud-provider-kind` is not running.
 - **`curl: (60)` certificate error after recreating the cluster:** each new cluster has a new root CA. Run the `kubectl get secret … > /tmp/internal-root-ca.crt` command again.
 - **The scripts refuse to run:** kubectl is pointing to another cluster. Check with `kubectl config current-context`.

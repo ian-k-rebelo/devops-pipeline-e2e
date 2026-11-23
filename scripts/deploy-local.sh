@@ -2,6 +2,8 @@
 # Build the application image and deploy the platform resources and the application to the local kind cluster.
 # Prerequisites: the kind cluster exists and scripts/install-platform.sh has been run.
 # Safe to run more than once: kubectl apply only changes what differs.
+# The manifests are rendered by the kustomize of tools/go/go.mod, the same pinned version the Lint
+# uses to validate them, so what is applied is what the Lint checked.
 # Each build gets a unique image tag (commit + image content), so a changed image always rolls out
 # and an unchanged one does not.
 set -euo pipefail
@@ -20,6 +22,34 @@ fi
 
 # Run from the repository root, wherever the script is called from
 cd "$(dirname "$0")/.."
+
+# 0) kustomize: built from tools/go/go.mod in the Go toolchain image (tools/golang/Dockerfile),
+#    every module checked against tools/go/go.sum, with the same settings and cache as lint.sh
+echo "==> kustomize: build the pinned version (tools/go/go.mod)"
+GOLANG_IMAGE="$(sed -n 's/^FROM //p' tools/golang/Dockerfile)"
+CACHE="${LINT_CACHE:-${XDG_CACHE_HOME:-${HOME}/.cache}/devops-pipeline-e2e/lint}"
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "${WORK_DIR}"' EXIT
+mkdir -p "${WORK_DIR}/bin" "${WORK_DIR}/overlay" "${CACHE}/mod" "${CACHE}/build" "${CACHE}/tmp"
+SANDBOX=(
+  --rm --user "$(id -u):$(id -g)"
+  --read-only --tmpfs /tmp -e HOME=/tmp
+  --cap-drop ALL --security-opt no-new-privileges
+)
+docker run "${SANDBOX[@]}" \
+  -v "${PWD}/tools/go:/src:ro" -v "${CACHE}:/cache" -v "${WORK_DIR}/bin:/out" -w /src \
+  -e GOMODCACHE=/cache/mod -e GOCACHE=/cache/build -e GOTMPDIR=/cache/tmp \
+  -e GOTOOLCHAIN=local -e GOPROXY=https://proxy.golang.org -e GOFLAGS=-mod=readonly \
+  -e CGO_ENABLED=0 \
+  "${GOLANG_IMAGE}" go build -trimpath -o /out/ sigs.k8s.io/kustomize/kustomize/v5
+
+# Renders a kustomization with the pinned kustomize, in a container with no network and everything
+# read-only: the repository is /src and the temporary overlay of step 3 is /overlay
+kustomize_build() {
+  docker run "${SANDBOX[@]}" --network none \
+    -v "${PWD}:/src:ro" -v "${WORK_DIR}/bin:/tools:ro" -v "${WORK_DIR}/overlay:/overlay:ro" \
+    -w /src "${GOLANG_IMAGE}" /tools/kustomize build "$1"
+}
 
 # 1) Application image: build it locally, tag it with the commit and the image content,
 #    and copy it into every kind node (each node has its own image store)
@@ -41,27 +71,26 @@ kind load docker-image "${IMAGE_NAME}:${TAG}" --name "${CLUSTER_NAME}"
 
 # 2) Platform resources, then wait until the CA and the gateway certificate are issued
 echo "==> Platform resources: gateway, internal CA and gateway certificate"
-kubectl apply -k platform
+kustomize_build platform | kubectl apply -f -
 kubectl wait --timeout=2m -n cert-manager certificate/internal-root-ca --for=condition=Ready
 kubectl wait --timeout=2m clusterissuer/internal-ca --for=condition=Ready
 kubectl wait --timeout=2m -n gateway certificate/app-devops-pipeline-e2e-internal --for=condition=Ready
 
 # 3) Application (base + local overlay, with this build's image tag), then wait until its Pods are ready
-#    A temporary overlay outside the repository sets the tag, so nothing in Git changes
-#    (unquoted EOF: ${TAG} and $(...) are replaced by their values)
+#    A temporary overlay outside the repository sets the tag, so nothing in Git changes; in the
+#    kustomize container, the repository is /src and this overlay is /overlay
+#    (unquoted EOF: ${IMAGE_NAME} and ${TAG} are replaced by their values)
 echo "==> Application: local overlay, with this build's image tag"
-WORK_DIR="$(mktemp -d)"
-trap 'rm -rf "${WORK_DIR}"' EXIT
-cat > "${WORK_DIR}/kustomization.yaml" <<EOF
+cat > "${WORK_DIR}/overlay/kustomization.yaml" <<EOF
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - $(realpath --relative-to="${WORK_DIR}" k8s/overlays/local)
+  - ../src/k8s/overlays/local
 images:
   - name: ${IMAGE_NAME}
     newTag: ${TAG}
 EOF
-kubectl apply -k "${WORK_DIR}"
+kustomize_build /overlay | kubectl apply -f -
 kubectl rollout status --timeout=2m -n devops-pipeline-e2e deployment/devops-pipeline-e2e
 
 # 4) Entry point ready: the gateway has its certificate and the application route

@@ -159,6 +159,53 @@ updates:
       prefix: ci
       include: scope
 
+  # helm in tools/helm/go.mod, which renders the CRDs for update-k8s-schemas.sh: a module of its
+  # own, so that its many dependencies never change the versions used by the tools of tools/go
+  - package-ecosystem: gomod
+    directory: /tools/helm
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Lisbon
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+
+  # Python image that runs the CRD converter of update-k8s-schemas.sh (tools/python/Dockerfile).
+  # Stay on Python 3.14: PyYAML must publish wheels for a new minor version first
+  - package-ecosystem: docker
+    directory: /tools/python
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Lisbon
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    commit-message:
+      prefix: ci
+      include: scope
+
+  # PyYAML for the CRD converter (tools/python/requirements.txt), pinned by version and hash
+  - package-ecosystem: pip
+    directory: /tools/python
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Lisbon
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+
   # GitHub Actions used by the workflows in .github/workflows
   - package-ecosystem: github-actions
     directory: /

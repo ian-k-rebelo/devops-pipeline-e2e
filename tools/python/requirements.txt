@@ -1,0 +1,7 @@
+# PyYAML for the converter of .github/scripts/update-k8s-schemas.sh, in the image of
+# tools/python/Dockerfile. Pinned by version and by hash: pip installs it with --require-hashes
+# and --only-binary=:all:, so only these wheels are accepted (CPython 3.14, Linux x86_64 and
+# aarch64), and a changed or different file is refused.
+pyyaml==6.0.3 \
+    --hash=sha256:c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5 \
+    --hash=sha256:501a031947e3a9025ed4405a168e6ef5ae3126c59f90ce0cd6f2bfc477be31b7
