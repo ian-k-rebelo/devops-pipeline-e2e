@@ -11,7 +11,7 @@ flowchart LR
   subgraph pr["Pull request (required checks)"]
     tests["Tests"] --> image["Image<br/>build once, SBOM, VEX check,<br/>smoke test, Trivy, Grype"]
     tools["Verify tool images"]
-    lint["Lint<br/>actionlint, ShellCheck, hadolint<br/>no network, read-only"]
+    lint["Lint<br/>actionlint, ShellCheck, hadolint,<br/>kubeconform<br/>no network, read-only"]
   end
   pr -->|squash and merge| main["main"]
   main --> publish["CI on main: Tests, Image,<br/>then Publish: push by digest,<br/>sign provenance and SBOM"]
@@ -54,9 +54,14 @@ flowchart LR
 - **actionlint** checks the workflows, and the shell of their `run` steps with ShellCheck;
   **ShellCheck** checks the shell scripts; **hadolint** checks the Dockerfiles. Only the files
   tracked by git are linted.
-- **Prepare** (with network): actionlint is built from `tools/go/go.mod` in the Go toolchain
-  image, and the ShellCheck and hadolint binaries are copied out of their pinned images, the
-  images that Tool images verifies.
+- **kubeconform** checks the Kubernetes manifests: every `kustomization.yaml` is rendered with
+  kustomize, as it is applied to the cluster, and each object is validated against the schema of
+  its kind and version in `tools/kubeconform/schemas`, in strict mode (an unknown field is an
+  error). First, the versions of the schemas must be the ones of the cluster (section 3,
+  *Kubernetes schemas*).
+- **Prepare** (with network): actionlint, kubeconform and kustomize are built from
+  `tools/go/go.mod` in the Go toolchain image, and the ShellCheck and hadolint binaries are copied
+  out of their pinned images, the images that Tool images verifies.
 - **Lint** (sandbox): each tool runs in a container with no network, a read-only file system and
   no Linux capabilities, as the user that runs the script (not root), with the repository mounted
   read-only. A compromised tool can neither send anything out nor change the code.
@@ -118,8 +123,11 @@ two-factor authentication.
 | Base image | `app/Dockerfile` | Tag and digest |
 | Python libraries | `app/requirements*.txt` | Exact versions |
 | GitHub Actions | `.github/workflows/*.yml` | Full commit SHA (version in a comment) |
-| Trivy, Syft, Grype, jq, hadolint, ShellCheck, Go toolchain | `tools/<tool>/Dockerfile` | Tag and digest |
+| Trivy, Syft, Grype, jq, hadolint, ShellCheck, Go toolchain, Python | `tools/<tool>/Dockerfile` | Tag and digest |
 | actionlint, kubeconform, kustomize (Go tools) | `tools/go/go.mod` | Exact versions, and the hash of every module in `tools/go/go.sum` |
+| helm (Go tool) | `tools/helm/go.mod` | Exact versions, and the hash of every module in `tools/helm/go.sum` |
+| PyYAML (the CRD converter) | `tools/python/requirements.txt` | Exact version and the hash of each wheel |
+| Sources of the Kubernetes schemas | `tools/kubeconform/versions` | Commit, digest and checksum |
 
 The tool Dockerfiles are never built: the scripts read the image from their `FROM` line. They
 exist so that Dependabot can propose new versions.
@@ -234,6 +242,36 @@ actionlint, kubeconform and kustomize are built from source with the Go toolchai
 the application). The Go toolchain checks every module against `tools/go/go.sum`, and the
 hashes in `go.sum` are checked against the public Go checksum database, an append-only log: every
 user gets exactly the same code for a version, and published code cannot be replaced.
+
+helm has a module of its own, `tools/helm/go.mod`. In one module every library has one version,
+the highest that any tool asks for: in `tools/go`, helm would change the libraries of the Lint
+tools (for example the JSON schema library of kubeconform). helm only runs when the schemas are
+updated, never in the Lint.
+
+**Kubernetes schemas** (`tools/kubeconform/`)
+
+kubeconform validates each object against a JSON schema of its kind and version. The schemas are
+kept in the repository, so the Lint needs no network and gives the same result for a commit:
+
+| Kinds | Source | Pinned by |
+|---|---|---|
+| Namespace, Deployment, Service | `yannh/kubernetes-json-schema`, for the Kubernetes version of `kind/cluster.yaml` | Commit |
+| GatewayClass, Gateway, HTTPRoute | The CRDs of the `gateway-crds-helm` chart of Envoy Gateway, rendered with the values of `scripts/install-platform.sh` | Digest |
+| Certificate, ClusterIssuer | The CRDs of the cert-manager release | Checksum |
+
+`.github/scripts/update-k8s-schemas.sh` generates them from `tools/kubeconform/versions`. With
+network, it builds helm, pulls the chart and downloads the CRDs, the core schemas and PyYAML;
+with no network, helm renders the chart and `.github/scripts/crd-to-jsonschema.py` converts each
+served version of the listed CRDs into a strict schema. The same versions always give the same
+files.
+
+- **A new version** (Kubernetes, Envoy Gateway or cert-manager): change it in
+  `tools/kubeconform/versions` with its new commit, digest or checksum, run the script, review the
+  diff of the schemas, and commit both with the change of `kind/cluster.yaml` or
+  `scripts/install-platform.sh`. Until then, the Lint fails: the versions must match.
+- **A new kind** in the manifests: add it to `CORE_SCHEMAS` or `CRD_KINDS` and run the script.
+  Until then, the Lint fails with `could not find schema`.
+- `tools/kubeconform/versions` is read with `sed`, never run.
 
 ## 4. Vulnerability policy
 
@@ -372,6 +410,7 @@ install, the default of the pinned `sigstore/cosign-installer`), git, curl, jq. 
 .github/scripts/install-jq.sh ~/.local/bin            # the same jq as the CI
 .github/scripts/verify-tool-image.sh grype            # trivy, syft, grype, jq, hadolint or shellcheck
 .github/scripts/lint.sh                               # the same lint as the CI
+.github/scripts/update-k8s-schemas.sh                 # after a change in tools/kubeconform/versions
 .github/scripts/check-vex.sh .github/vex/openvex.json sbom.cdx.json
 .github/scripts/scan-trivy.sh remote "ghcr.io/ian-k-rebelo/devops-pipeline-e2e@${DIGEST}"
 .github/scripts/scan-grype.sh sbom.cdx.json
@@ -383,8 +422,9 @@ another exceptions file, and `TOOL_TODAY=YYYY-MM-DD` tests the release age on an
 exist only for tests.
 
 `lint.sh` keeps the Go module and build cache in `~/.cache/devops-pipeline-e2e/lint` between runs
-(`LINT_CACHE` replaces the folder). Go makes its module cache read-only: to delete it, run
-`chmod -R u+w` on the folder first.
+(`LINT_CACHE` replaces the folder), shared with `update-k8s-schemas.sh` and
+`scripts/deploy-local.sh`. Go makes its module cache read-only: to delete it, run `chmod -R u+w`
+on the folder first.
 
 ## 8. Known limitations
 
@@ -405,6 +445,9 @@ exist only for tests.
 - **A VEX statement that no scanner uses is not detected:** the VEX check reads the SBOM, so it
   warns when a package leaves the image, not when the scanners stop showing the CVE (for example
   after a database fix). The renewal review checks the scanners' output (section 4).
+- **kubeconform does not evaluate the CEL rules of the CRDs** (`x-kubernetes-validations`), for
+  example the rules that combine two fields of an HTTPRoute: only the API server does. Planned: a
+  server-side dry run (`kubectl apply --dry-run=server`) in a kind cluster, in the CD stage.
 - **ShellCheck publishes no signatures:** its image can only be compared with its GitHub release,
   so a compromise of both channels would not be detected.
 - **Dependabot cannot apply the cooldown to `ghcr.io`** (jq, hadolint): it proposes those updates
