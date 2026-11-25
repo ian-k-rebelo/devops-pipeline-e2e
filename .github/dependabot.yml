@@ -145,7 +145,8 @@ updates:
       include: scope
 
   # Go tools (actionlint, kubeconform, kustomize) in tools/go/go.mod; the Go toolchain checks
-  # every module against tools/go/go.sum and the public Go checksum database
+  # every module against tools/go/go.sum, and .github/scripts/check-go-sum.sh checks go.sum
+  # against the public Go checksum database
   - package-ecosystem: gomod
     directory: /tools/go
     schedule:
@@ -155,6 +156,20 @@ updates:
       timezone: Europe/Lisbon
     cooldown:
       default-days: 7
+    # The tools are "// indirect" in go.mod (the tool directive requires them, no code imports
+    # them), and Dependabot only updates direct dependencies by default. An allow list replaces
+    # that default, so its first rule keeps it: no version updates for the libraries (none is a
+    # direct dependency) and security updates for all of them (security updates do not check the
+    # dependency type). The other rules add each tool by name, of any type. Tested in a test
+    # repository: docs/ci-security.md, section 3 (Go tools)
+    allow:
+      - dependency-type: direct
+      - dependency-name: github.com/rhysd/actionlint
+        dependency-type: all
+      - dependency-name: github.com/yannh/kubeconform
+        dependency-type: all
+      - dependency-name: sigs.k8s.io/kustomize/kustomize/v5
+        dependency-type: all
     commit-message:
       prefix: ci
       include: scope
@@ -170,6 +185,11 @@ updates:
       timezone: Europe/Lisbon
     cooldown:
       default-days: 7
+    # The same allow rules as /tools/go (see there), for helm
+    allow:
+      - dependency-type: direct
+      - dependency-name: helm.sh/helm/v4
+        dependency-type: all
     commit-message:
       prefix: ci
       include: scope

@@ -209,6 +209,21 @@ same merge commit as before, which does not have the exception.
    the merge.
 5. **Approve** with a comment that says what was checked, then squash and merge.
 
+**Reviewing a Dependabot pull request for a Go module** (`tools/go`, `tools/helm`)
+
+1. **Files changed:** only `go.mod` and `go.sum` of that module. A version update changes the line
+   of the tool and of the libraries whose versions it needs; a security update changes the
+   library of the alert and the libraries it needs.
+2. **Checksums:** `.github/scripts/check-go-sum.sh tools/go` (or `tools/helm`) passes: every line
+   of `go.sum` is the one of the Go checksum database. Dependabot writes the `go.sum` of a
+   security update without the database (below, *Go tools*).
+3. **The release:** for a tool, as for a tool image (its date, the notes, the **Security** tab);
+   for a security update, the advisory of the alert and its fixed version.
+4. **The test:** for `tools/go`, Lint builds and runs the tools. helm never runs in the Lint: run
+   `.github/scripts/update-k8s-schemas.sh`, and the schemas must not change
+   (`git status --short tools/kubeconform/schemas` shows nothing), or their diff is reviewed.
+5. **Approve** with a comment that says what was checked, then squash and merge.
+
 **A pull request behind `main`**
 
 Use *Update branch* → **Update with rebase** (never *Update with merge commit*), then review and
@@ -239,14 +254,44 @@ harmless tag with the digest of another image, and every other check would still
 
 actionlint, kubeconform and kustomize are built from source with the Go toolchain image
 (`tools/golang/Dockerfile`, a Docker Official Image pinned by digest, like the base image of
-the application). The Go toolchain checks every module against `tools/go/go.sum`, and the
-hashes in `go.sum` are checked against the public Go checksum database, an append-only log: every
-user gets exactly the same code for a version, and published code cannot be replaced.
+the application). The Go toolchain checks every module against `tools/go/go.sum`. The public Go
+checksum database (`sum.golang.org`) is an append-only log: every user gets exactly the same code
+for a version, and published code cannot be replaced. The toolchain only asks it when a line is
+added to `go.sum`: a build trusts the lines that are already there.
 
 helm has a module of its own, `tools/helm/go.mod`. In one module every library has one version,
 the highest that any tool asks for: in `tools/go`, helm would change the libraries of the Lint
 tools (for example the JSON schema library of kubeconform). helm only runs when the schemas are
 updated, never in the Lint.
+
+`.github/scripts/check-go-sum.sh <module folder>` checks every line of the `go.sum` of a module: it
+writes a new `go.sum` with `go mod tidy`, with the database on and an empty module cache, and
+compares it with the one of the repository. Both `go.sum` files are tidy, the form that
+Dependabot writes.
+
+The tools are `// indirect` in `go.mod` (the `tool` directive requires them, no code imports
+them), and Dependabot only updates direct dependencies by default: until November 2026 it never
+proposed a new version of a Go tool. Each `gomod` entry of `.github/dependabot.yml` has two kinds
+of `allow` rules: the default rule (`dependency-type: direct`) and each tool by name, of any type
+(`dependency-type: all`). An allow list replaces the default rule, also for security updates, so
+the default rule is written again:
+
+| | Version updates | Security updates |
+|---|---|---|
+| The tools | Yes (their rules by name) | Yes |
+| Their libraries | No: none is a direct dependency, and they come with each release of the tool | Yes: security updates do not check the dependency type |
+
+Tested in a test repository (November 2026), with an `// indirect` library with known advisories
+(`github.com/ulikunitz/xz` v0.5.7): with the rules by name only, its security update was blocked
+("all versions were ignored"); with the default rule added, the pull request opened (v0.5.14, the
+lowest version without the advisories), and the alerts closed as fixed after the merge. The test
+also showed that:
+
+- a change of the `allow` rules does not run a failed security update again: use *Try again* on
+  the alert;
+- Dependabot runs the security updates for Go with `GONOSUMDB=*` (seen in the job definition, at
+  the start of the log), so the new lines of `go.sum` are not checked against the database. The
+  review runs `check-go-sum.sh` (above).
 
 **Kubernetes schemas** (`tools/kubeconform/`)
 
@@ -397,6 +442,9 @@ it, its statement was removed.
 - **Dependabot, every Monday** after 06:00: *Insights* → *Dependency graph* → *Dependabot*. A
   failed update job is not notified anywhere else, and a ⚠️ shows a warning (such as the cooldown
   not applied to `ghcr.io`).
+- **Dependabot alerts, every Monday:** *Security* → *Dependabot alerts*. An open alert without a
+  pull request is a security update that failed or was blocked: its page shows the error, and
+  *Try again* after the fix.
 - **A new automation is proven by its result,** not by a green job: a new Dependabot entry by a
   pull request it opens, a new check by a negative test that makes it fail.
 - **Run logs and summaries** are kept for 90 days (the GitHub default). Reports that must be kept
@@ -412,6 +460,7 @@ install, the default of the pinned `sigstore/cosign-installer`), git, curl, jq. 
 .github/scripts/install-jq.sh ~/.local/bin            # the same jq as the CI
 .github/scripts/verify-tool-image.sh grype            # trivy, syft, grype, jq, hadolint or shellcheck
 .github/scripts/lint.sh                               # the same lint as the CI
+.github/scripts/check-go-sum.sh tools/go              # or tools/helm: go.sum against sum.golang.org
 .github/scripts/update-k8s-schemas.sh                 # after a change in tools/kubeconform/versions
 .github/scripts/check-vex.sh .github/vex/openvex.json sbom.cdx.json
 .github/scripts/scan-trivy.sh remote "ghcr.io/ian-k-rebelo/devops-pipeline-e2e@${DIGEST}"
@@ -455,6 +504,11 @@ on the folder first.
 - **Dependabot cannot apply the cooldown to `ghcr.io`** (jq, hadolint): it proposes those updates
   on the day of the release, and the release age check of Tool images blocks them until they are
   7 days old.
+- **Security updates for Go skip the checksum database** (`GONOSUMDB=*` in their job): the
+  review runs `check-go-sum.sh` by hand (section 3). Planned: run it in the Lint, on every pull
+  request.
+- **The allow rules for security updates of Go libraries were tested in a test repository:** in
+  this repository they will only be seen when an advisory affects one of the libraries.
 - **Dependabot comment commands are not used:** GitHub removed several of them in January 2026,
   and `@dependabot rebase` was never processed in this repository; *Update with rebase* is used
   instead (section 3).
