@@ -371,8 +371,10 @@ link to the run. GitHub also emails whoever last changed the schedule about the 
      manual security update does not wait for the Dependabot cooldown);
    - no new image yet, and the vulnerable code is not reachable: a temporary VEX exception, with
      the reason and the exit (section 4);
-   - no new image yet, and the code is reachable: install the fixed package in the Dockerfile
-     until the base image has it.
+   - no new image with the fix yet, and the code is reachable: install the fixed package in the
+     Dockerfile, with its exact version (hadolint DL3008), until the base image has it. The step
+     first checks the version in the base image and fails the build when it is already fixed, so
+     it is removed in the pull request that updates the base image.
 4. **Open a pull request** with the fix; every required check must pass.
 5. **After the merge,** run **Scheduled scan** by hand (Actions, *Run workflow*, on `main`). When it
    passes, Notify closes the issue.
