@@ -4,4 +4,4 @@
 # nonroot variant: Grype runs without root privileges and only reads the SBOM.
 # Every pull request that changes it is checked by .github/workflows/verify-tools.yml:
 # the binary in the image must be the binary of the signed release of the version in the tag.
-FROM anchore/grype:v0.121.3-nonroot@sha256:33559478ce73255cf4457a8343add3693788be2b40dd471c3dac2713f1c80c1d
+FROM anchore/grype:v0.122.1-nonroot@sha256:35e6adfef62c2d04fa4995a30dd28829963ce62506c343bf3ed4ae9b5db1dadc
