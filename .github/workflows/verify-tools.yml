@@ -1,5 +1,5 @@
 # Tool images: checks that the tool images pinned in tools/<tool>/Dockerfile (Trivy, Syft, Grype,
-# jq, hadolint and ShellCheck) are the official images of their versions, with
+# jq, hadolint, ShellCheck and the Go toolchain) are the official images of their versions, with
 # .github/scripts/verify-tool-image.sh.
 # On pull requests it always runs, because it is a required check, and verifies only the tools
 # whose Dockerfile changed (all of them when the script or this workflow changed); with no tool
@@ -39,7 +39,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
         run: |
-          ALL="trivy syft grype jq hadolint shellcheck"
+          ALL="trivy syft grype jq hadolint shellcheck golang"
           if [[ "${EVENT}" != "pull_request" ]]; then
             TOOLS="${ALL}"
           else

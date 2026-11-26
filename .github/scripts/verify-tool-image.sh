@@ -7,22 +7,24 @@
 #     binary in the image (linux/amd64, the platform of the CI) is byte for byte the binary of that
 #     release.
 # ShellCheck publishes no signatures: its binary is only compared with the binary of the release.
+# Go toolchain (golang): the Go in the image is compared with the Go release published as a module
+# in the public Go checksum database (sum.golang.org).
 # Every tool: the GitHub release of that version must be at least 7 days old (a compromised
 # release is usually found and withdrawn within days), unless tools/release-age-exceptions.json
 # has a valid exception for that tag.
 # Used by .github/workflows/verify-tools.yml on pull requests that change a tool image, and by hand
 # to audit all of them.
-# Usage: verify-tool-image.sh trivy|syft|grype|jq|hadolint|shellcheck
+# Usage: verify-tool-image.sh trivy|syft|grype|jq|hadolint|shellcheck|golang
 # Needs: docker, cosign, git, curl, jq, sha256sum. Adds a row to $GITHUB_STEP_SUMMARY when it is set.
 # GITHUB_TOKEN, when set, authenticates the requests to the GitHub API (higher rate limit).
 # TOOL_DOCKERFILE, TOOL_EXCEPTIONS and TOOL_TODAY (YYYY-MM-DD) replace the Dockerfile, the exceptions
 # file and today's date, only to test this script.
 set -euo pipefail
 
-USAGE="usage: verify-tool-image.sh trivy|syft|grype|jq|hadolint|shellcheck"
+USAGE="usage: verify-tool-image.sh trivy|syft|grype|jq|hadolint|shellcheck|golang"
 TOOL="${1:?${USAGE}}"
 case "${TOOL}" in
-  trivy | syft | grype | jq | hadolint | shellcheck) ;;
+  trivy | syft | grype | jq | hadolint | shellcheck | golang) ;;
   *) echo "${USAGE}" >&2; exit 1 ;;
 esac
 
@@ -101,10 +103,11 @@ github_api() {
 
 # Fails unless the GitHub release with tag $2 of repository $1 was published at least
 # MIN_RELEASE_AGE_DAYS days ago (whole days, UTC), or tools/release-age-exceptions.json has a valid
-# exception for this tool and TAG. Sets RELEASED (the publication date) for the summary
+# exception for this tool and TAG. Sets RELEASED (the publication date) for the summary.
+# $3, when given, is the release time (YYYY-MM-DDThh:mm:ssZ) instead of the GitHub release
 check_release_age() {
   local published days latest expired matches expires reason
-  published="$(github_api "repos/$1/releases/tags/$2" | jq -r '.published_at // empty')"
+  published="${3:-$(github_api "repos/$1/releases/tags/$2" | jq -r '.published_at // empty')}"
   if [[ ! "${published}" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})T ]]; then
     echo "Release $2 of $1 has no publication date" >&2
     return 1
@@ -302,6 +305,95 @@ verify_shellcheck() {
   RESULT="⚠️"
 }
 
+# Go toolchain: the image is not signed. The Go team publishes each release as the module
+# golang.org/toolchain, recorded in the public Go checksum database (sum.golang.org). The module
+# is downloaded with the database on by the Go of the golang image of the parent commit (on a pull
+# request, the base branch: the image reviewed before), never by the image under check. Every
+# file of the module must be in /usr/local/go of the image, byte for byte (the module names the
+# go.mod files _go.mod); the image may only have more files in api, doc, misc and test (tests and
+# documentation, never run). The scripts run "docker run <image> go ...", so the image must have
+# no entrypoint, no other go before /usr/local/go/bin on its PATH, and only the variables of the
+# official image. The release date is the time in the VERSION file of the module.
+# GOLANG_VERIFIER_IMAGE replaces the image whose Go downloads the module.
+verify_golang() {
+  read_image
+  local version="${TAG%%-*}"
+  local module="golang.org/toolchain@v0.0.1-go${version}.linux-amd64"
+  local verifier dir released cid config path entry extra
+  verifier="${GOLANG_VERIFIER_IMAGE:-$(git -C "${REPO_ROOT}" show HEAD^1:tools/golang/Dockerfile | sed -n 's/^FROM //p')}"
+  if [[ ! "${verifier}" =~ ^[^:@]+:[^@]+@sha256:[0-9a-f]{64}$ ]]; then
+    echo "The verifier image must be name:tag@sha256:digest, found: '${verifier}'" >&2
+    return 1
+  fi
+  echo "Module ${module}, downloaded and checked by the Go of ${verifier}"
+  mkdir -p "${WORK}/cache/tmp"
+  docker run --rm --user "$(id -u):$(id -g)" --read-only --tmpfs /tmp -e HOME=/tmp \
+    --cap-drop ALL --security-opt no-new-privileges -v "${WORK}/cache:/cache" -w /tmp \
+    -e GOPATH=/cache/go -e GOMODCACHE=/cache/mod -e GOCACHE=/cache/build -e GOTMPDIR=/cache/tmp \
+    -e GOTOOLCHAIN=local -e GOPROXY=https://proxy.golang.org -e GOSUMDB=sum.golang.org \
+    -e GONOSUMDB= -e GOPRIVATE= -e GOINSECURE= -e GOFLAGS=-modcacherw \
+    "${verifier}" go mod download -json "${module}" | jq -r '"Module hash: \(.Sum)"'
+  dir="${WORK}/cache/mod/${module}"
+
+  if [[ "$(head -n 1 "${dir}/VERSION")" != "go${version}" ]]; then
+    echo "The VERSION file of the module is not go${version}" >&2
+    return 1
+  fi
+  released="$(sed -n 's/^time //p' "${dir}/VERSION")"
+  check_release_age golang "go${version}" "${released}"
+
+  # The configuration of the image: no entrypoint, and only the variables of the official image
+  config="$(docker image inspect --format '{{json .Config}}' "${IMAGE}@${DIGEST}")"
+  entry="$(jq -c '.Entrypoint' <<< "${config}")"
+  if [[ "${entry}" != "null" ]]; then
+    echo "The image has an entrypoint: ${entry}" >&2
+    return 1
+  fi
+  if [[ "$(jq -r '[.Env[] | sub("=.*"; "")] | sort | join(" ")' <<< "${config}")" \
+    != "GOLANG_VERSION GOPATH GOTOOLCHAIN PATH" ]] \
+    || [[ "$(jq -r '.Env[] | select(startswith("GOLANG_VERSION=")) | sub("^[^=]*="; "")' \
+    <<< "${config}")" != "${version}" ]]; then
+    echo "The environment of the image is not the one of the official image: $(jq -c '.Env' <<< "${config}")" >&2
+    return 1
+  fi
+  path="$(jq -r '.Env[] | select(startswith("PATH=")) | sub("^PATH="; "")' <<< "${config}")"
+
+  # The files: copied out of the image; the container is created but never started
+  cid="$(docker create --platform linux/amd64 "${IMAGE}@${DIGEST}")"
+  docker cp "${cid}:/usr/local/go" "${WORK}/image-go" > /dev/null
+  local d found=""
+  IFS=: read -r -a dirs <<< "${path}"
+  for d in "${dirs[@]}"; do
+    if [[ "${d}" == /usr/local/go/bin ]]; then
+      found=yes
+      break
+    fi
+    if docker cp "${cid}:${d}/go" "${WORK}/other-go" > /dev/null 2>&1; then
+      echo "Another go comes first on the PATH of the image: ${d}/go" >&2
+      docker rm "${cid}" > /dev/null
+      return 1
+    fi
+  done
+  docker rm "${cid}" > /dev/null
+  if [[ -z "${found}" ]]; then
+    echo "/usr/local/go/bin is not on the PATH of the image: ${path}" >&2
+    return 1
+  fi
+
+  (cd "${dir}" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) \
+    | sed 's#/_go\.mod$#/go.mod#' > "${WORK}/module.sha256"
+  (cd "${WORK}/image-go" && sha256sum --quiet -c "${WORK}/module.sha256")
+  echo "$(wc -l < "${WORK}/module.sha256") files of the module: all in the image, byte for byte"
+  extra="$(comm -23 <(cd "${WORK}/image-go" && find . ! -type d | LC_ALL=C sort) \
+    <(cut -c 67- "${WORK}/module.sha256" | LC_ALL=C sort) | grep -vE '^\./(api|doc|misc|test)/' || true)"
+  if [[ -n "${extra}" ]]; then
+    echo "Files in the image that are not in the module:" >&2
+    echo "${extra}" >&2
+    return 1
+  fi
+  METHOD="Go release from the public Go checksum database (module ${module}, read by the Go of the image reviewed before): every file of the module is in the image, no other go on the PATH, no entrypoint"
+}
+
 # ---------- entry point ----------
 
 case "${TOOL}" in
@@ -310,6 +402,7 @@ case "${TOOL}" in
   jq) verify_jq ;;
   hadolint) verify_hadolint ;;
   shellcheck) verify_shellcheck ;;
+  golang) verify_golang ;;
 esac
 
 METHOD="${METHOD}${AGE_NOTE}"
