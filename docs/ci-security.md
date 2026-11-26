@@ -37,6 +37,7 @@ flowchart LR
 | Tool images | `.github/workflows/verify-tools.yml` | Every pull request; by hand | Verify tool images |
 | Lint | `.github/workflows/lint.yml` | Every pull request; by hand | Lint |
 | PR title | `.github/workflows/pr-title.yml` | Every pull request: opened, title edited, new commits | Conventional Commits |
+| CodeQL | `.github/workflows/codeql.yml` | Every pull request; push to `main`; every Monday at 04:17 UTC; by hand | Analyze (actions), Analyze (python) |
 
 **CI jobs**
 
@@ -87,6 +88,22 @@ Conventional Commits, `type(scope)!: summary`:
 - It runs when a pull request is opened, when its title is edited and on every push. The title
   only reaches the shell as an environment variable; the job has no checkout and no permissions.
 
+**CodeQL** (`.github/workflows/codeql.yml`)
+
+The scanners of the image (section 4) and Dependabot find known vulnerabilities in what we use;
+CodeQL looks for security mistakes in the code we write (static analysis, SAST):
+
+- **What:** the Python of the repository (the app and the scripts in Python) and the GitHub
+  Actions workflows (for example, an event value pasted into a script). Shell scripts are not
+  supported by CodeQL: ShellCheck checks them in the Lint.
+- **How:** the `security-extended` queries, from the source (`build-mode: none`), with
+  `github/codeql-action` pinned by commit, like every action. The results go to *Security* →
+  *Code scanning*.
+- **When:** on every pull request, on every push to `main`, and every Monday, because new queries
+  can find problems in code that did not change.
+- **The gate:** the analysis passes even when it finds something, so it is not a required check.
+  The ruleset blocks the merge instead (below, *Branch rules*).
+
 **Permissions and secrets**
 
 - Every workflow starts with no permissions (or `contents: read`), and each job asks only for
@@ -104,6 +121,9 @@ Conventional Commits, `type(scope)!: summary`:
   pushes and deleting `main` are blocked.
 - Required checks: **Tests**, **Image**, **Verify tool images**, **Lint** and **Conventional
   Commits** (the PR title); the branch must be up to date with `main` before merging.
+- Code scanning results (*Require code scanning results*): CodeQL must have analysed the pull
+  request, and a new security alert of severity **High or higher**, or a new alert of level
+  **Error**, blocks the merge.
 - Every check runs on every pull request. A workflow skipped by a `paths` filter would leave its
   required check waiting forever, so the Tool images workflow always runs and decides inside
   (with no tool change it passes without verifying anything).
@@ -485,6 +505,9 @@ closed the issue before the scan; it was reopened, and the manual scan closed it
 - **Dependabot alerts, every Monday:** *Security* → *Dependabot alerts*. An open alert without a
   pull request is a security update that failed or was blocked: its page shows the error, and
   *Try again* after the fix.
+- **Code scanning alerts, every Monday:** *Security* → *Code scanning*, after the weekly CodeQL
+  analysis. Each open alert is fixed, or dismissed with the reason (*false positive*, *won't
+  fix*, *used in tests*).
 - **A new automation is proven by its result,** not by a green job: a new Dependabot entry by a
   pull request it opens, a new check by a negative test that makes it fail.
 - **Run logs and summaries** are kept for 90 days (the GitHub default). Reports that must be kept
@@ -530,6 +553,9 @@ on the folder first.
   checks, the empty bypass list, the approval of outside pull requests, CODEOWNERS and the pull
   request checklist. The settings for a team are ready (section 2, *Team mode*).
 - **Only `linux/amd64`** binaries of the tools are compared, the platform of the runners.
+- **Code scanning merge protection only sees the lines of the pull request:** an alert in code
+  that a pull request does not change (for example, found by new queries in the weekly analysis)
+  does not block it. It is in *Security* → *Code scanning*, reviewed every Monday (section 7).
 - **A VEX statement that no scanner uses is not detected:** the VEX check reads the SBOM, so it
   warns when a package leaves the image, not when the scanners stop showing the CVE (for example
   after a database fix). The renewal review checks the scanners' output (section 4).
