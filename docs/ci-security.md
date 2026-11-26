@@ -419,19 +419,30 @@ link to the run. GitHub also emails whoever last changed the schedule about the 
    - no new image with the fix yet, and the code is reachable: install the fixed package in the
      Dockerfile, with its exact version (hadolint DL3008), until the base image has it. The step
      first checks the version in the base image and fails the build when it is already fixed, so
-     it is removed in the pull request that updates the base image.
-4. **Open a pull request** with the fix; every required check must pass.
+     it is removed in the pull request that updates the base image. Dependabot cannot remove it:
+     its pull request for that base image fails CI / Image, so push a commit that removes the
+     step to that branch, or close it and open a pull request with both changes.
+4. **Open a pull request** with the fix; every required check must pass. Its description refers
+   to the issue with `Refs #N`: a closing keyword followed by the number (`close`, `fixes`,
+   `resolved` and their other forms) closes the issue at the merge, before the scan proves the
+   fix. Before merging, the *Development* section of the pull request must not list the issue.
 5. **After the merge,** run **Scheduled scan** by hand (Actions, *Run workflow*, on `main`). When it
    passes, Notify closes the issue.
 
-**Example:** in November 2026, the scan found two HIGH vulnerabilities in `zlib1g`, in the `gz*`
-file functions (issue #18). Debian had fixed them, but the official Python image had not been
-rebuilt yet, and the app only reaches zlib through the Python `zlib` module, which never calls
-those functions. They were accepted with a temporary VEX exception (pull request #19), and the
-manual scan closed the issue. One of them, CVE-2026-76844, turned out to be a wrong match in the
-Trivy database: the Debian tracker lists it for `webpack-dev-middleware` (NOT-FOR-US), and the
-zlib fix, DSA-6613-1, is for CVE-2026-27171 and CVE-2026-85091. When both scanners stopped showing
-it, its statement was removed.
+**Incidents.** In each one, Debian had fixed a package of the official Python image before the
+image was rebuilt; the issue links the failed runs, and the pull request has the analysis:
+
+| Issue | Finding | Decision | Fix |
+|---|---|---|---|
+| #18 | `zlib1g`: CVE-2026-85091 and CVE-2026-76844 (HIGH), in the `gz*` file functions | Not reachable: the app only reaches zlib through the Python `zlib` module, which never calls them. Temporary VEX exception | #19 (2026-11-09) |
+| #37 | `libc6`, `libc-bin`: CVE-2026-19499 and CVE-2026-5435 (HIGH in Grype), fixed in the Debian 13.8 point release | Not reachable: no ELF file of the image imports `strfmon`, `strfmon_l` or the `libresolv` printing functions (`readelf --dyn-syms`). Temporary VEX exception | #41 (2026-11-23) |
+| #45 | `libzstd1`: CVE-2026-124851 (HIGH in Trivy), in the decompression of zstd | Reachable: `libcrypto` (OpenSSL) imports the zstd decompression functions, and the app loads it (Python `hashlib` and `ssl`). New base image, with the fixed package installed until the base image has it; the new image also ended the exceptions of #18 and #37 | #46 (2026-11-25) |
+
+In #18, CVE-2026-76844 turned out to be a wrong match in the Trivy database: the Debian tracker
+lists it for `webpack-dev-middleware` (NOT-FOR-US), and the zlib fix, DSA-6613-1, is for
+CVE-2026-27171 and CVE-2026-85091. When both scanners stopped showing it, its statement was
+removed (#35). In #45, the description of the pull request had a closing keyword, so the merge
+closed the issue before the scan; it was reopened, and the manual scan closed it (step 4).
 
 ## 7. Audit and local checks
 
@@ -518,3 +529,10 @@ on the folder first.
   admin. Tamper-proof storage (for example an object store with a retention lock) is not used.
 - **The image check in the Image job** compares the config digest with the image ID, which only
   holds for Docker's classic image store, the one used by the runners.
+- **A package installed with its exact version can disappear:** a Debian repository usually keeps
+  only the newest version of each package, so when a newer fix of a package that the Dockerfile
+  installs is published (section 6, step 3), that version leaves `trixie-security` and every
+  build fails until the Dockerfile is updated. The step is temporary for this reason too.
+- **The base image is the source of most findings:** the three incidents of November 2026 (#18,
+  #37, #45) were packages of the official Python image (section 6). Planned: evaluate a smaller
+  base image, with fewer packages to scan and to update.
