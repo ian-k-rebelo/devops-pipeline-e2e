@@ -2,6 +2,8 @@
 # Kubernetes manifests) with .github/scripts/lint.sh, the same script and the same pinned tools as
 # the local setup.
 # Each tool runs in a container with no network and the repository mounted read-only.
+# Then the go.sum of the Go modules that the pull request changes is checked against the public
+# Go checksum database, with .github/scripts/check-go-sum.sh.
 # It is a required check, so it runs on every pull request, whatever the files it changes.
 name: Lint
 
@@ -25,9 +27,58 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Two commits: on a pull request, HEAD is the merge of the pull request into the base branch
+      # and HEAD^1 is the base branch, so "git diff HEAD^1 HEAD" is what the pull request changes
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
 
       - name: Lint
         run: .github/scripts/lint.sh
+
+      # A build only checks the modules against go.sum, never the lines of go.sum, and Dependabot
+      # writes the go.sum of a security update for Go without the checksum database. Checks the
+      # modules whose go.mod or go.sum the pull request changes; all of them when the check, this
+      # workflow or the Go toolchain image changes (go mod tidy may write go.sum differently), and
+      # when run by hand. Runs even when Lint failed, so one run shows every problem
+      - name: Check go.sum against the checksum database
+        if: ${{ !cancelled() }}
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          ALL="$(git ls-files -- 'go.mod' '*/go.mod' | xargs -r -n 1 dirname | sort -u | xargs)"
+          if [[ "${EVENT}" != "pull_request" ]]; then
+            MODULES="${ALL}"
+          else
+            CHANGED="$(git diff --name-only HEAD^1 HEAD)"
+            echo "Files changed by the pull request:"
+            echo "${CHANGED}"
+            if grep -qxE '\.github/(scripts/check-go-sum\.sh|workflows/lint\.yml)|tools/golang/Dockerfile' <<< "${CHANGED}"; then
+              MODULES="${ALL}"
+            else
+              MODULES="$( (grep -E '(^|/)go\.(mod|sum)$' <<< "${CHANGED}" || true) | xargs -r -n 1 dirname | sort -u | xargs)"
+            fi
+          fi
+          echo "Modules to check: ${MODULES:-none}"
+          if [[ -z "${MODULES}" ]]; then
+            echo "No go.mod or go.sum changed: nothing to check"
+            exit 0
+          fi
+          FAILED=""
+          for m in ${MODULES}; do
+            if [[ ! -f "${m}/go.mod" ]]; then
+              echo "${m}: no go.mod any more (the module was removed), skipped"
+              continue
+            fi
+            echo "::group::${m}"
+            if ! .github/scripts/check-go-sum.sh "${m}"; then
+              FAILED="${FAILED} ${m}"
+            fi
+            echo "::endgroup::"
+          done
+          if [[ -n "${FAILED}" ]]; then
+            echo "::error title=go.sum::not the one of the Go checksum database:${FAILED}"
+            exit 1
+          fi
+          echo "go.sum matches the Go checksum database: ${MODULES}"

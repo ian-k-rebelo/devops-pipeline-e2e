@@ -65,6 +65,9 @@ flowchart LR
 - **Lint** (sandbox): each tool runs in a container with no network, a read-only file system and
   no Linux capabilities, as the user that runs the script (not root), with the repository mounted
   read-only. A compromised tool can neither send anything out nor change the code.
+- **go.sum** (a step of the Lint job, with network): `.github/scripts/check-go-sum.sh` checks the
+  Go modules whose `go.mod` or `go.sum` the pull request changes, and all of them when the check,
+  the Lint workflow or the Go toolchain image changes (section 3, *Go tools*).
 - The same script runs locally (section 7), so a failure in the CI can be reproduced exactly.
 - A finding is fixed, or ignored on that line only, with a comment that says why
   (`# hadolint ignore=DLxxxx`, `# shellcheck disable=SCxxxx`); never for the whole project.
@@ -215,9 +218,9 @@ same merge commit as before, which does not have the exception.
 1. **Files changed:** only `go.mod` and `go.sum` of that module. A version update changes the line
    of the tool and of the libraries whose versions it needs; a security update changes the
    library of the alert and the libraries it needs.
-2. **Checksums:** `.github/scripts/check-go-sum.sh tools/go` (or `tools/helm`) passes: every line
-   of `go.sum` is the one of the Go checksum database. Dependabot writes the `go.sum` of a
-   security update without the database (below, *Go tools*).
+2. **Checksums:** in the Lint job, the step *Check go.sum against the checksum database* checked
+   that module and passed: every line of `go.sum` is the one of the Go checksum database.
+   Dependabot writes the `go.sum` of a security update without the database (below, *Go tools*).
 3. **The release:** for a tool, as for a tool image (its date, the notes, the **Security** tab);
    for a security update, the advisory of the alert and its fixed version.
 4. **The test:** for `tools/go`, Lint builds and runs the tools. helm never runs in the Lint: run
@@ -276,7 +279,9 @@ updated, never in the Lint.
 `.github/scripts/check-go-sum.sh <module folder>` checks every line of the `go.sum` of a module: it
 writes a new `go.sum` with `go mod tidy`, with the database on and an empty module cache, and
 compares it with the one of the repository. Both `go.sum` files are tidy, the form that
-Dependabot writes.
+Dependabot writes. The Lint runs it on every pull request that changes a `go.mod` or a `go.sum`,
+and on every module when the check, the Lint workflow or the Go toolchain image changes: a new
+Go may write `go.sum` differently, and the difference is then seen in that pull request.
 
 The tools are `// indirect` in `go.mod` (the `tool` directive requires them, no code imports
 them), and Dependabot only updates direct dependencies by default: until November 2026 it never
@@ -300,7 +305,7 @@ also showed that:
   the alert;
 - Dependabot runs the security updates for Go with `GONOSUMDB=*` (seen in the job definition, at
   the start of the log), so the new lines of `go.sum` are not checked against the database. The
-  review runs `check-go-sum.sh` (above).
+  Lint runs `check-go-sum.sh` (above).
 
 **Kubernetes schemas** (`tools/kubeconform/`)
 
@@ -521,9 +526,6 @@ on the folder first.
 - **Dependabot cannot apply the cooldown to `ghcr.io`** (jq, hadolint): it proposes those updates
   on the day of the release, and the release age check of Tool images blocks them until they are
   7 days old.
-- **Security updates for Go skip the checksum database** (`GONOSUMDB=*` in their job): the
-  review runs `check-go-sum.sh` by hand (section 3). Planned: run it in the Lint, on every pull
-  request.
 - **The allow rules for security updates of Go libraries were tested in a test repository:** in
   this repository they will only be seen when an advisory affects one of the libraries.
 - **Dependabot comment commands are not used:** GitHub removed several of them in January 2026,
