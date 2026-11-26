@@ -8,7 +8,7 @@
 
 ## Checklist
 
-- [ ] The title follows Conventional Commits (`type: summary`): it becomes the squash commit
+- [ ] The title follows Conventional Commits (`type(scope): summary`, checked by PR title): it becomes the squash commit
 - [ ] Tests cover the change, or it does not change behaviour
 - [ ] No secrets, keys or tokens in the change
 - [ ] New versions are pinned (digest or commit SHA) and come from a verified source

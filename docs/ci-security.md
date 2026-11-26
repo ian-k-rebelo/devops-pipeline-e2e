@@ -36,6 +36,7 @@ flowchart LR
 | Scheduled scan | `.github/workflows/scheduled-scan.yml` | Every day at 07:41 UTC; by hand; pull requests that change the scan or what it uses | Scan, Notify (never on pull requests) |
 | Tool images | `.github/workflows/verify-tools.yml` | Every pull request; by hand | Verify tool images |
 | Lint | `.github/workflows/lint.yml` | Every pull request; by hand | Lint |
+| PR title | `.github/workflows/pr-title.yml` | Every pull request: opened, title edited, new commits | Conventional Commits |
 
 **CI jobs**
 
@@ -72,6 +73,20 @@ flowchart LR
 - A finding is fixed, or ignored on that line only, with a comment that says why
   (`# hadolint ignore=DLxxxx`, `# shellcheck disable=SCxxxx`); never for the whole project.
 
+**PR title** (`.github/workflows/pr-title.yml`)
+
+The squash merge makes the title of a pull request the commit on `main`, so the title must follow
+Conventional Commits, `type(scope)!: summary`:
+
+- **type:** `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`
+  or `test`. The **scope** is optional (lowercase letters, digits and `-`, such as `deps` or
+  `platform`), and `!` marks a breaking change.
+- **summary:** starts with a lowercase letter or a digit, and does not end with a period.
+- **length:** at most 72 characters, the limit of the first line of a commit, except for
+  Dependabot, whose titles are generated.
+- It runs when a pull request is opened, when its title is edited and on every push. The title
+  only reaches the shell as an environment variable; the job has no checkout and no permissions.
+
 **Permissions and secrets**
 
 - Every workflow starts with no permissions (or `contents: read`), and each job asks only for
@@ -87,8 +102,8 @@ flowchart LR
 
 - Changes reach `main` only through pull requests, merged with squash (linear history); force
   pushes and deleting `main` are blocked.
-- Required checks: **Tests**, **Image**, **Verify tool images** and **Lint**; the branch must be
-  up to date with `main` before merging.
+- Required checks: **Tests**, **Image**, **Verify tool images**, **Lint** and **Conventional
+  Commits** (the PR title); the branch must be up to date with `main` before merging.
 - Every check runs on every pull request. A workflow skipped by a `paths` filter would leave its
   required check waiting forever, so the Tool images workflow always runs and decides inside
   (with no tool change it passes without verifying anything).
