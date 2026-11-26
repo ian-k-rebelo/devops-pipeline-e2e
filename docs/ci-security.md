@@ -152,7 +152,8 @@ tool (below).
 
 **Release age**
 
-Tool images reads the publication date of the GitHub release of each tool, and fails if it is
+Tool images reads the publication date of the GitHub release of each tool (for Go, which has no
+GitHub releases, the time in the `VERSION` file of the verified release), and fails if it is
 less than **7 days** old (whole days, UTC). This holds whatever the registry, and does not depend
 on Dependabot. A pull request opened earlier stays red: run the check again when the release is
 old enough.
@@ -245,6 +246,14 @@ of the version in its tag:
 | jq | Attested | The provenance attestation of the image and of the release binary, and that the binary in the image is the release binary |
 | hadolint | No | The provenance attestation of the release binary (read from the GitHub API; release workflow, commit of the version tag), and that the binary in the image is the release binary |
 | ShellCheck | No | ShellCheck publishes no signatures: only that the binary in the image (Docker Hub) is the binary of the GitHub release. The summary marks it ⚠️ |
+| Go toolchain (`golang`) | No | The Go release, published by the Go team as the module `golang.org/toolchain` in the public Go checksum database, downloaded by the Go of the image reviewed before (the base branch), never by the image under check: every file of the module is in `/usr/local/go`, byte for byte (only tests and documentation may be extra). The image has no entrypoint, no other `go` before `/usr/local/go/bin` on its `PATH`, and only the variables of the official image |
+
+The rest of the Go toolchain image (Debian, gcc, git) is not compared, and it never runs in a
+build: the Go tools are built with `CGO_ENABLED=0` (no C compiler), modules only come from the Go
+module proxy (no git), and the Go binaries are static (they do not load the C library of the
+image). Each Go image is checked by the one before it; the first one, `golang:1.27.3-trixie`, was
+also checked without any Go, in the pull request that added the check: the hash of its module,
+computed with Python from the module file, is the one in the checksum database.
 
 Docker pulls by digest and ignores the tag, so without this check a pull request could show a
 harmless tag with the digest of another image, and every other check would still pass. Only the
@@ -448,7 +457,7 @@ closed the issue before the scan; it was reopened, and the manual scan closed it
 
 **Evidence**
 
-- **Tool images, run by hand** (Actions, *Run workflow*): verifies the six tool images and lists
+- **Tool images, run by hand** (Actions, *Run workflow*): verifies the seven tool images and lists
   each one in the job summary, with the release date, the commit and the date.
 - **Dependabot, every Monday** after 06:00: *Insights* → *Dependency graph* → *Dependabot*. A
   failed update job is not notified anywhere else, and a ⚠️ shows a warning (such as the cooldown
@@ -469,7 +478,7 @@ install, the default of the pinned `sigstore/cosign-installer`), git, curl, jq. 
 
 ```bash
 .github/scripts/install-jq.sh ~/.local/bin            # the same jq as the CI
-.github/scripts/verify-tool-image.sh grype            # trivy, syft, grype, jq, hadolint or shellcheck
+.github/scripts/verify-tool-image.sh grype            # or: trivy syft jq hadolint shellcheck golang
 .github/scripts/lint.sh                               # the same lint as the CI
 .github/scripts/check-go-sum.sh tools/go              # or tools/helm: go.sum against sum.golang.org
 .github/scripts/update-k8s-schemas.sh                 # after a change in tools/kubeconform/versions
@@ -481,7 +490,8 @@ install, the default of the pinned `sigstore/cosign-installer`), git, curl, jq. 
 `VEX_TODAY=YYYY-MM-DD` tests the expiry of the VEX exceptions on another date. For
 `verify-tool-image.sh`, `TOOL_DOCKERFILE` points at another Dockerfile, `TOOL_EXCEPTIONS` at
 another exceptions file, and `TOOL_TODAY=YYYY-MM-DD` tests the release age on another date. They
-exist only for tests.
+exist only for tests. For `golang`, `GOLANG_VERIFIER_IMAGE` replaces the image whose Go downloads
+the Go release (by default, the one of the parent commit).
 
 `lint.sh` keeps the Go module and build cache in `~/.cache/devops-pipeline-e2e/lint` between runs
 (`LINT_CACHE` replaces the folder), shared with `update-k8s-schemas.sh` and
@@ -495,10 +505,6 @@ on the folder first.
   merged, publish or reach secrets (the jobs only read, and there are none), but it runs on the
   temporary runner and can lie about that pull request's results; in Lint it has no network and
   cannot change the code. Planned: verify the tool first.
-- **The Go toolchain image is not verified yet:** it is pinned by digest and is a Docker Official
-  Image, like the base image of the application, but it is not compared with the Go release yet.
-  It builds the Go tools, with network. Planned: compare the Go in the image with the checksums
-  published by the Go team on go.dev.
 - **No second reviewer:** the project has one maintainer, and GitHub does not let authors approve
   their own pull requests, so no approval is required. Compensating controls: the required
   checks, the empty bypass list, the approval of outside pull requests, CODEOWNERS and the pull
