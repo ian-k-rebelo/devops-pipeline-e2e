@@ -1,0 +1,50 @@
+# PR title: checks that the title of a pull request follows Conventional Commits, because the
+# squash merge makes it the commit on main (docs/ci-security.md, section 2).
+# The title is text written by whoever opens the pull request: it only reaches the shell as an
+# environment variable, never inside the script, so it cannot run as code (script injection).
+# No checkout and no permissions: the title comes in the event of the pull request.
+# It runs when a pull request is opened, when its title or description is edited, and on every
+# push, so that a fixed title is checked again. It is a required check.
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+# No permissions: the job only reads the event
+permissions: {}
+
+# A new event of the same pull request cancels the run that is still going
+concurrency:
+  group: pr-title-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Conventional Commits
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # type(scope)!: summary. The type from the list, an optional scope (lowercase letters,
+      # digits and -), an optional ! for a breaking change, and a summary that starts with a
+      # lowercase letter or a digit and does not end with a period. At most 72 characters, the
+      # limit of the first line of a commit, except for Dependabot, whose titles are generated
+      - name: Check the title of the pull request
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          TYPES="build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test"
+          PATTERN="^(${TYPES})(\([a-z0-9-]+\))?!?: [a-z0-9](.*[^.])?$"
+          MAX=72
+          echo "Title: ${TITLE}"
+          echo "Author: ${AUTHOR}"
+          if [[ ! "${TITLE}" =~ ${PATTERN} ]]; then
+            echo "::error title=PR title::not Conventional Commits. Use type(scope): summary, with a type of ${TYPES//|/, }, a lowercase summary and no period at the end, for example: ci: check go.sum in the Lint"
+            exit 1
+          fi
+          if [[ "${AUTHOR}" != "dependabot[bot]" && "${#TITLE}" -gt "${MAX}" ]]; then
+            echo "::error title=PR title::${#TITLE} characters, the maximum is ${MAX} (the first line of the squash commit)"
+            exit 1
+          fi
+          echo "The title follows Conventional Commits (${#TITLE} characters)"
