@@ -41,7 +41,8 @@ flowchart LR
 
 **CI jobs**
 
-- **Tests:** `pytest` on Python 3.12, the same minor version as the image.
+- **Tests:** `pytest` on Python 3.12, the same minor version as the image, with the packages of
+  `app/requirements-dev.txt` (hashes, only wheels; section 3, *Python libraries*).
 - **Image:** builds the image once (loaded into Docker for the tests, and saved as an OCI archive
   for Publish), checks that both are the same image, generates the SBOM with Syft, checks the
   VEX exceptions, runs a smoke test on `/health`, and scans with Trivy (the image) and Grype (the
@@ -159,12 +160,13 @@ two-factor authentication.
 | What | Where | Pinned by |
 |---|---|---|
 | Base image | `app/Dockerfile` | Tag and digest |
-| Python libraries | `app/requirements*.txt` | Exact versions |
+| Python libraries of the app | `app/requirements*.in`, and `app/requirements*.txt` written by pip-compile | Exact versions, and the hashes of every package (below, *Python libraries*) |
 | GitHub Actions | `.github/workflows/*.yml` | Full commit SHA (version in a comment) |
 | Trivy, Syft, Grype, jq, hadolint, ShellCheck, Go toolchain, Python | `tools/<tool>/Dockerfile` | Tag and digest |
 | actionlint, kubeconform, kustomize (Go tools) | `tools/go/go.mod` | Exact versions, and the hash of every module in `tools/go/go.sum` |
 | helm (Go tool) | `tools/helm/go.mod` | Exact versions, and the hash of every module in `tools/helm/go.sum` |
 | PyYAML (the CRD converter) | `tools/python/requirements.txt` | Exact version and the hash of each wheel |
+| pip-tools (writes the requirements of the app) | `tools/pip-tools/requirements.in`, and `tools/pip-tools/requirements.txt` written by pip-compile | Exact versions, and the hashes of every package |
 | Sources of the Kubernetes schemas | `tools/kubeconform/versions` | Commit, digest and checksum |
 
 The tool Dockerfiles are never built: the scripts read the image from their `FROM` line. They
@@ -263,6 +265,18 @@ same merge commit as before, which does not have the exception.
    (`git status --short tools/kubeconform/schemas` shows nothing), or their diff is reviewed.
 5. **Approve** with a comment that says what was checked, then squash and merge.
 
+**Reviewing a Dependabot pull request for a Python library** (`app`, `tools/pip-tools`)
+
+1. **Files changed:** for a library of a `.in` file, its line there; in the `.txt` files, the
+   version and the hashes of each updated package. A new package is a dependency that a new
+   version needs (its `# via` says which); a removed one is no longer needed.
+2. **New packages:** pip-compile has no cooldown, so check the date of each new package on PyPI
+   (`https://pypi.org/project/<name>/<version>/`), as for the release of a tool (section 8).
+3. **The release:** the changelog of each updated library, and its security advisories.
+4. **The pipeline:** Tests and Image pass: every file matches its hash, and the tests and the
+   smoke test pass with the new versions.
+5. **Approve** with a comment that says what was checked, then squash and merge.
+
 **A pull request behind `main`**
 
 Use *Update branch* → **Update with rebase** (never *Update with merge commit*), then review and
@@ -296,6 +310,34 @@ computed with Python from the module file, is the one in the checksum database.
 Docker pulls by digest and ignores the tag, so without this check a pull request could show a
 harmless tag with the digest of another image, and every other check would still pass. Only the
 `linux/amd64` binary is compared: it is the one the runners execute.
+
+**Python libraries** (`app/requirements*.in`)
+
+A version says which release to install, not which file: without hashes, pip installs whatever
+file PyPI, a mirror or a proxy sends for that version. So every Python package is pinned by
+version and by hash:
+
+- **What a person edits:** `app/requirements.in`, the libraries that the app imports and
+  gunicorn, and `app/requirements-dev.in`, the same with `pytest`. Exact versions (`==`).
+- **What is written:** `.github/scripts/compile-requirements.sh` runs pip-compile (pip-tools) in
+  the image of the app, and writes `app/requirements.txt` and `app/requirements-dev.txt`: every
+  dependency, its exact version, the sha256 of every file of that version on PyPI, and why it is
+  there (`# via`). The versions already in a `.txt` are kept. A `.txt` is never edited by hand.
+- **How it is installed:** `pip install --require-hashes --only-binary=:all:`, in the image
+  (`app/Dockerfile`) and in the Tests job. Each file must match one of the hashes of its package,
+  and a package that is not in the file is refused. Only wheels, because a hash is checked for the
+  file that is downloaded: when the wheel does not match, pip would build the package from its
+  source instead, with build tools that are not pinned (in a test, `flit_core` for Flask).
+- **Updates:** Dependabot runs pip-compile with the Python of the header of the `.txt`
+  (`autogenerated by pip-compile with Python 3.12`), so it updates the hashes, and adds or
+  removes the dependencies that a new version needs. This is why the `.txt` files are written in
+  the image of the app, never with the Python of a laptop.
+- **pip-tools** itself is pinned the same way (`tools/pip-tools/requirements.in`), and the script
+  installs it with `--require-hashes --only-binary=:all:`.
+
+To add a library: add it to `app/requirements.in` with its exact version, run
+`compile-requirements.sh`, check the date of each new package in the diff (pip-compile has no
+cooldown, section 8), and commit the `.in` and `.txt` files together.
 
 **Go tools** (`tools/go/go.mod`)
 
@@ -524,6 +566,7 @@ install, the default of the pinned `sigstore/cosign-installer`), git, curl, jq. 
 .github/scripts/verify-tool-image.sh grype            # or: trivy syft jq hadolint shellcheck golang
 .github/scripts/lint.sh                               # the same lint as the CI
 .github/scripts/check-go-sum.sh tools/go              # or tools/helm: go.sum against sum.golang.org
+.github/scripts/compile-requirements.sh               # after a change in a requirements*.in file
 .github/scripts/update-k8s-schemas.sh                 # after a change in tools/kubeconform/versions
 .github/scripts/check-vex.sh .github/vex/openvex.json sbom.cdx.json
 .github/scripts/scan-trivy.sh remote "ghcr.io/ian-k-rebelo/devops-pipeline-e2e@${DIGEST}"
@@ -553,6 +596,9 @@ on the folder first.
   checks, the empty bypass list, the approval of outside pull requests, CODEOWNERS and the pull
   request checklist. The settings for a team are ready (section 2, *Team mode*).
 - **Only `linux/amd64`** binaries of the tools are compared, the platform of the runners.
+- **pip-compile has no cooldown:** a package that pip-compile adds to a `.txt` (a new dependency
+  in a Dependabot update, or of a library added by hand) comes in its newest version, whatever
+  its age. The review checks its date (section 3).
 - **Code scanning merge protection only sees the lines of the pull request:** an alert in code
   that a pull request does not change (for example, found by new queries in the weekly analysis)
   does not block it. It is in *Security* → *Code scanning*, reviewed every Monday (section 7).

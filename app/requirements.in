@@ -1,0 +1,6 @@
+# Libraries that the app imports (app.py) and gunicorn, the server that runs it, at exact
+# versions. requirements.txt is written from this file by .github/scripts/compile-requirements.sh,
+# with every dependency and its hashes: edit this file, never the .txt (docs/ci-security.md,
+# section 3).
+Flask==3.1.3
+gunicorn==27.0.1

@@ -2,7 +2,9 @@
 # Security updates are enabled in the repository settings and are not delayed by the cooldown.
 version: 2
 updates:
-  # Python libraries in app/requirements.txt and app/requirements-dev.txt
+  # Python libraries of the app: app/requirements*.in, and app/requirements*.txt written from
+  # them by pip-compile, with every dependency and its hashes. Dependabot runs pip-compile, so it
+  # updates the hashes, and adds or removes the dependencies that a new version needs
   - package-ecosystem: pip
     directory: /app
     schedule:
@@ -224,6 +226,24 @@ updates:
       default-days: 7
     commit-message:
       prefix: ci
+      include: scope
+
+  # pip-tools for .github/scripts/compile-requirements.sh (tools/pip-tools/requirements.in), with
+  # its dependencies and their hashes in tools/pip-tools/requirements.txt; one pull request for all
+  - package-ecosystem: pip
+    directory: /tools/pip-tools
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Lisbon
+    cooldown:
+      default-days: 7
+    groups:
+      pip-tools:
+        patterns: ["*"]
+    commit-message:
+      prefix: build
       include: scope
 
   # GitHub Actions used by the workflows in .github/workflows

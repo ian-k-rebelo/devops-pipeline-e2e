@@ -33,8 +33,11 @@ jobs:
           cache: pip
           cache-dependency-path: app/requirements*.txt
 
+      # As in the image: each file must match a hash of requirements-dev.txt, only wheels.
+      # A block (|), because ": " in ":all: " would end a plain YAML value
       - name: Install dependencies
-        run: pip install -r requirements-dev.txt
+        run: |
+          pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
 
       - name: Run tests
         run: python -m pytest -v

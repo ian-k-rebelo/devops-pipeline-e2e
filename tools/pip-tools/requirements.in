@@ -1,0 +1,4 @@
+# pip-tools for .github/scripts/compile-requirements.sh, which writes app/requirements*.txt from
+# app/requirements*.in. The script installs it from requirements.txt, written by pip-compile from
+# this file: every package with its exact version and hashes (docs/ci-security.md, section 3).
+pip-tools==7.7.0
