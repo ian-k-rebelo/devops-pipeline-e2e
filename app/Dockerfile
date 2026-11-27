@@ -24,9 +24,12 @@ WORKDIR /app
 # Unprivileged user to run the application, instead of root
 RUN useradd --create-home --uid 10001 appuser
 
-# Install dependencies first, so this layer is cached while only the code changes
+# Install dependencies first, so this layer is cached while only the code changes.
+# requirements.txt is written by pip-compile (requirements.in): each file must match one of the
+# hashes of its package (--require-hashes), and only wheels are installed (--only-binary=:all:):
+# a package built from its source would run build tools that are not pinned
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --require-hashes --only-binary=:all: -r requirements.txt
 
 # Application code: changes often, so it is copied last
 COPY app.py .

@@ -1,0 +1,4 @@
+# The libraries of the app (requirements.in) and the test tools, for the Tests job of the CI.
+# requirements-dev.txt is written from this file by .github/scripts/compile-requirements.sh.
+-r requirements.in
+pytest==9.2.0
