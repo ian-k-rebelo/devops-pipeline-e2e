@@ -440,6 +440,12 @@ The CI (on every pull request and on `main`) and the scheduled scan fail on **HI
 Their databases are updated at different times, so one can find a new vulnerability a day before
 the other.
 
+**Severity** comes from the source that reported each vulnerability: GitHub (GHSA advisories) for
+the Python libraries, in both scanners; Debian, other sources or NVD for the Debian packages; NVD
+for the Python interpreter (Grype only). Grype does not use `--by-cve`, which would replace the
+severity from GitHub with the one from NVD; since April 2026, NVD no longer gives a severity to
+most new CVEs (section 8).
+
 **Accepted vulnerabilities (VEX)**
 
 Exceptions are declared in `.github/vex/openvex.json` (OpenVEX), read by both scanners.
@@ -451,6 +457,12 @@ OpenVEX has no expiry date, so `.github/scripts/check-vex.sh` enforces the rules
   `pkg:deb/debian/apt@3.0.3`. A Debian version with an epoch (`1:...`) needs **two** products: the
   version with the epoch, as in the SBOM (read by Grype), and the version without it (read by
   Trivy, which moves the epoch to a qualifier).
+- The `name` of the vulnerability is the ID that Trivy reports, and `aliases` lists the ID that
+  Grype reports when it is different: for a Python library, Trivy reports the CVE and Grype the
+  GHSA (both scanners list the other ID: Trivy in `VendorIDs`, Grype in
+  `relatedVulnerabilities`). Each scanner matches a statement by its `name` and its `aliases`, so
+  a statement without the GHSA suppresses a library finding in Trivy only (tested in November
+  2026, section 7). A Debian package has the same CVE in both scanners: no aliases.
 - A statement expires **30 days** after its date (`last_updated`, else `timestamp`): from then on,
   the CI and the scheduled scan fail until it is reviewed. A future date is an error.
 - A product that is no longer in the image gives a warning: the statement can be removed.
@@ -569,6 +581,16 @@ closed the issue before the scan; it was reopened, and the manual scan closed it
   fix*, *used in tests*).
 - **A new automation is proven by its result,** not by a green job: a new Dependabot entry by a
   pull request it opens, a new check by a negative test that makes it fail.
+- **Vulnerabilities with a fix but no severity, every Monday:** in the last scheduled scan, the
+  step *Scan SBOM for vulnerabilities* (Grype) lists every vulnerability that has a fix (the
+  others are shown as suppressed). One with the severity Unknown never fails the gates (section
+  8): check it in the tracker of the distribution.
+- **Hashes and the image without pip** (November 2026): every finding of the images
+  `sha-9afc71b` (with pip) and `sha-a5bdf5c` (without it), scanned one after the other: the six
+  vulnerabilities of pip 25.0.1 are gone in Trivy and in Grype, and none was added. Pull request
+  #59, never merged: a wrong hash fails Tests (`requirements-dev.txt`) and Image
+  (`requirements.txt`, in the build stage), and blocks the merge. A test VEX file, outside the
+  repository: Grype suppressed a pip finding only when the statement listed its GHSA.
 - **Run logs and summaries** are kept for 90 days (the GitHub default). Reports that must be kept
   longer are attached to the GitHub release of each version.
 - **Attestations** (provenance and SBOM) are stored in GitHub and next to the image in `ghcr.io`.
@@ -652,3 +674,9 @@ on the folder first.
 - **The file system of the container can be written:** the Pod does not use
   `readOnlyRootFilesystem` yet. Planned: enable it, with an `emptyDir` for `/tmp`; gunicorn
   already runs without its control socket, which it would write in the home of the user.
+- **A vulnerability without a severity never fails the gates:** the gates fail on HIGH or
+  CRITICAL, Debian gives a severity to few of its vulnerabilities, and since April 2026 NVD no
+  longer gives one to most new CVEs. A vulnerability with a fix and the severity Unknown (for
+  example CVE-2026-135901 in `passwd` and `login.defs`, November 2026) is only seen in the weekly
+  review (section 7). In Grype, the Python interpreter gets its severity from NVD only. Planned: a
+  warning in the scheduled scan for a vulnerability with a fix and no severity.
